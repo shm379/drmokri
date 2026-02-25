@@ -50,10 +50,10 @@ interface SavedQuery {
 }
 
 const LANGUAGES = [
-  { id: 'fa', label: 'فارسی', dir: 'rtl' },
-  { id: 'en', label: 'English', dir: 'ltr' },
-  { id: 'tr', label: 'Türkçe', dir: 'ltr' },
-  { id: 'ar', label: 'العربية', dir: 'rtl' },
+  { id: 'fa', label: 'فارسی', dir: 'rtl', flag: '🇮🇷' },
+  { id: 'en', label: 'English', dir: 'ltr', flag: '🇺🇸' },
+  { id: 'tr', label: 'Türkçe', dir: 'ltr', flag: '🇹🇷' },
+  { id: 'ar', label: 'العربية', dir: 'rtl', flag: '🇸🇦' },
 ];
 
 const TRANSLATIONS: Record<string, any> = {
@@ -82,6 +82,12 @@ const TRANSLATIONS: Record<string, any> = {
     aboutYouDesc: 'توضیح کوتاهی درباره شرایط فعلی، سن یا هر چیزی که فکر می‌کنید به تحلیل بهتر کمک می‌کند.',
     aboutYouPlaceholder: 'مثلاً: من ۳۰ ساله هستم و اخیراً در محیط کار دچار استرس شده‌ام...',
     next: 'بعدی',
+    discover: 'اکتشاف',
+    journal: 'دفترچه احساسات',
+    glossary: 'دانشنامه',
+    quizzes: 'آزمون‌ها',
+    moodPlaceholder: 'امروز چه حسی داری؟ بنویس تا دکتر راهنماییت کنه...',
+    saveMood: 'ثبت وضعیت روحی',
   },
   en: {
     welcome: 'Welcome',
@@ -108,7 +114,77 @@ const TRANSLATIONS: Record<string, any> = {
     aboutYouDesc: 'A brief description of your situation, age, or anything that helps with the analysis.',
     aboutYouPlaceholder: 'e.g., I am 30 years old and recently stressed at work...',
     next: 'Next',
+    discover: 'Discover',
+    journal: 'Mood Journal',
+    glossary: 'Glossary',
+    quizzes: 'Quizzes',
+    moodPlaceholder: 'How are you feeling today? Write it down...',
+    saveMood: 'Save Mood',
   },
+  tr: {
+    welcome: 'Hoş Geldiniz',
+    start: 'Kişilik Analizine Başla',
+    phonePlaceholder: 'E-posta veya Telefon',
+    login: 'Giriş / Kayıt',
+    assessment: 'Kişilik Analizi',
+    style: 'Yanıt Tarzı',
+    chat: 'Akıllı Asistan',
+    history: 'Geçmişim',
+    public: 'Başkalarının Deneyimleri',
+    problemPlaceholder: 'Sorunuzu sorun veya probleminizi anlatın...',
+    analyze: 'Analiz ve Çözüm Al',
+    articleMode: 'Gelişmiş Makale Modu',
+    articleDesc: 'Kavramsal görseller ve çarpıcı görsel yapı ile derin içerik',
+    personalityIdentified: 'Belirlenen Kişilik:',
+    newQuestion: 'Yeni Soru',
+    logout: 'Çıkış Yap',
+    loading: 'Podcastler analiz ediliyor...',
+    error: 'Bir hata oluştu. Lütfen tekrar deneyin.',
+    language: 'Dil',
+    anonymous: 'Anonim',
+    aboutYou: 'Bize kendinizden bahsedin',
+    aboutYouDesc: 'Durumunuz, yaşınız veya analize yardımcı olacak herhangi bir şey hakkında kısa bir açıklama.',
+    aboutYouPlaceholder: 'Örn: 30 yaşındayım ve son zamanlarda iş yerinde stresliyim...',
+    next: 'İleri',
+    discover: 'Keşfet',
+    journal: 'Duygu Günlüğü',
+    glossary: 'Sözlük',
+    quizzes: 'Testler',
+    moodPlaceholder: 'Bugün nasıl hissediyorsun?',
+    saveMood: 'Ruh Halini Kaydet',
+  },
+  ar: {
+    welcome: 'أهلاً بك',
+    start: 'ابدأ تقييم الشخصية',
+    phonePlaceholder: 'البريد الإلكتروني أو رقم الهاتف',
+    login: 'تسجيل الدخول / التسجيل',
+    assessment: 'تقييم الشخصية',
+    style: 'أسلوب الرد',
+    chat: 'المساعد الذكي',
+    history: 'سجلي',
+    public: 'تجارب الآخرين',
+    problemPlaceholder: 'اطرح سؤالك أو صف مشكلتك...',
+    analyze: 'احصل على التحليل والحلول',
+    articleMode: 'وضع المقال المتقدم',
+    articleDesc: 'محتوى عميق مع صور مفاهيمية وهيكل بصري مذهل',
+    personalityIdentified: 'الشخصية المحددة:',
+    newQuestion: 'سؤال جديد',
+    logout: 'تسجيل الخروج',
+    loading: 'جاري تحليل البودكاست...',
+    error: 'حدث خطأ. يرجى المحاولة مرة أخرى.',
+    language: 'اللغة',
+    anonymous: 'مجهول',
+    aboutYou: 'أخبرنا عن نفسك',
+    aboutYouDesc: 'وصف موجز لحالتك، عمرك، أو أي شيء يساعد في التحليل.',
+    aboutYouPlaceholder: 'مثلاً: أنا عمري ٣٠ عاماً وأعاني من ضغوط في العمل مؤخراً...',
+    next: 'التالي',
+    discover: 'اكتشف',
+    journal: 'مذكرة المشاعر',
+    glossary: 'الموسوعة',
+    quizzes: 'الاختبارات',
+    moodPlaceholder: 'كيف تشعر اليوم؟ اكتب هنا...',
+    saveMood: 'حفظ الحالة النفسية',
+  }
 };
 
 const ASSESSMENT_QUESTIONS = [
@@ -185,7 +261,8 @@ const RESPONSE_STYLES = [
 
 export default function App() {
   const [lang, setLang] = useState('fa');
-  const [step, setStep] = useState<'login' | 'welcome' | 'assessment' | 'about' | 'style' | 'chat' | 'history' | 'public'>('login');
+  const [showLangModal, setShowLangModal] = useState(false);
+  const [step, setStep] = useState<'login' | 'welcome' | 'assessment' | 'about' | 'style' | 'chat' | 'history' | 'public' | 'discover' | 'journal' | 'glossary' | 'quizzes'>('login');
   const [user, setUser] = useState<UserData | null>(null);
   const [phone, setPhone] = useState('');
   const [userContext, setUserContext] = useState('');
@@ -540,8 +617,17 @@ User's Problem: ${problem}
       }
     });
 
-    // 2. Split into blocks (images, steps, important boxes, and plain text)
-    // We'll use a regex to find our custom tags
+    // 2. Handle Podcast Links (e.g., Podcast #110 or فایل ۱۱۰)
+    const podcastRegex = /(?:Podcast|پادکست|فایل)\s*(?:#|شماره)?\s*(\d+)/gi;
+    processedContent = processedContent.replace(podcastRegex, (match, num) => {
+      const source = PODCASTS_DB.find(p => p.id === parseInt(num));
+      if (source) {
+        return `[${match}](${source.link})`;
+      }
+      return match;
+    });
+
+    // 3. Split into blocks (images, steps, important boxes, and plain text)
     const blockRegex = /(:::(?:important|step|image)[\s\S]*?:::)/g;
     const blocks = processedContent.split(blockRegex);
 
@@ -617,21 +703,61 @@ User's Problem: ${problem}
           </div>
 
           <div className="flex items-center gap-2">
-            <div className="flex bg-white p-1 rounded-xl shadow-sm border border-gray-100">
-              {LANGUAGES.map(l => (
-                <button key={l.id} onClick={() => setLang(l.id)} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${lang === l.id ? 'bg-emerald-600 text-white' : 'text-gray-400 hover:bg-gray-50'}`}>
-                  {l.label}
-                </button>
-              ))}
+            {/* Language Selector */}
+            <div className="relative">
+              <button 
+                onClick={() => setShowLangModal(true)} 
+                className="flex items-center gap-2 bg-white px-4 py-2 rounded-xl shadow-sm border border-gray-100 hover:bg-gray-50 transition-all"
+              >
+                <span className="text-lg">{LANGUAGES.find(l => l.id === lang)?.flag}</span>
+                <span className="text-xs font-bold text-gray-700 uppercase">{lang}</span>
+                <ChevronDown className="w-4 h-4 text-gray-400" />
+              </button>
+
+              <AnimatePresence>
+                {showLangModal && (
+                  <>
+                    <motion.div 
+                      initial={{ opacity: 0 }} 
+                      animate={{ opacity: 1 }} 
+                      exit={{ opacity: 0 }} 
+                      onClick={() => setShowLangModal(false)}
+                      className="fixed inset-0 bg-black/20 backdrop-blur-sm z-50" 
+                    />
+                    <motion.div 
+                      initial={{ opacity: 0, y: '100%' }} 
+                      animate={{ opacity: 1, y: 0 }} 
+                      exit={{ opacity: 0, y: '100%' }}
+                      transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+                      className="fixed inset-0 md:inset-auto md:absolute md:top-full md:right-0 md:translate-y-2 w-full h-full md:h-auto md:w-64 bg-white rounded-t-[3rem] md:rounded-[2rem] shadow-2xl border-t md:border border-gray-100 p-8 md:p-4 z-[51] flex flex-col"
+                    >
+                      <div className="flex items-center justify-between mb-8 md:hidden">
+                        <h3 className="text-2xl font-bold">{t.language}</h3>
+                        <button onClick={() => setShowLangModal(false)} className="p-2 bg-gray-100 rounded-full"><X className="w-6 h-6" /></button>
+                      </div>
+                      <div className="space-y-3 flex-1 overflow-y-auto">
+                        {LANGUAGES.map(l => (
+                          <button 
+                            key={l.id} 
+                            onClick={() => { setLang(l.id); setShowLangModal(false); }} 
+                            className={`w-full flex items-center justify-between p-6 md:p-4 rounded-[2rem] md:rounded-2xl transition-all ${lang === l.id ? 'bg-emerald-50 text-emerald-700' : 'hover:bg-gray-50 text-gray-600'}`}
+                          >
+                            <div className="flex items-center gap-4">
+                              <span className="text-3xl md:text-2xl">{l.flag}</span>
+                              <span className="font-bold text-lg md:text-base">{l.label}</span>
+                            </div>
+                            {lang === l.id && <div className="w-3 h-3 md:w-2 md:h-2 bg-emerald-500 rounded-full" />}
+                          </button>
+                        ))}
+                      </div>
+                    </motion.div>
+                  </>
+                )}
+              </AnimatePresence>
             </div>
+
             {user && (
               <div className="flex gap-2">
-                <button onClick={fetchHistory} className="p-2 bg-white rounded-xl shadow-sm border border-gray-100 text-gray-500 hover:text-emerald-600" title={t.history}>
-                  <History className="w-5 h-5" />
-                </button>
-                <button onClick={fetchPublicFeed} className="p-2 bg-white rounded-xl shadow-sm border border-gray-100 text-gray-500 hover:text-emerald-600" title={t.public}>
-                  <Users className="w-5 h-5" />
-                </button>
                 <button onClick={() => { localStorage.removeItem('mokri_user'); setUser(null); setStep('login'); }} className="p-2 bg-white rounded-xl shadow-sm border border-gray-100 text-red-400 hover:text-red-600" title={t.logout}>
                   <LogOut className="w-5 h-5" />
                 </button>
@@ -640,7 +766,7 @@ User's Problem: ${problem}
           </div>
         </header>
 
-        <main className="relative">
+        <main className="relative pb-24 md:pb-8">
           <AnimatePresence mode="wait">
             {step === 'login' && (
               <motion.div key="login" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="bg-white rounded-[2.5rem] p-10 shadow-xl shadow-emerald-900/5 border border-emerald-50 text-center">
@@ -834,38 +960,163 @@ User's Problem: ${problem}
 
             {step === 'history' && (
               <motion.div key="history" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} className="space-y-6">
-                <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center justify-between mb-6">
                   <h2 className="text-2xl font-bold">{t.history}</h2>
                   <button onClick={() => setStep('chat')} className="p-2 bg-white rounded-xl shadow-sm border border-gray-100 text-gray-500"><ChevronRight className={`w-6 h-6 ${dir === 'rtl' ? '' : 'rotate-180'}`} /></button>
                 </div>
                 <div className="grid gap-4">
-                  {history.map(q => (
-                    <div key={q.id} className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
-                      <div className="text-xs text-gray-400 mb-2">{new Date(q.created_at).toLocaleDateString(lang)}</div>
-                      <div className="font-bold mb-4 text-gray-900">{q.problem}</div>
-                      <button onClick={() => { setResult(q.answer); setGeneratedImages(q.images); setStep('chat'); }} className="text-sm text-emerald-600 font-bold hover:underline">{t.chat}</button>
-                    </div>
-                  ))}
+                  {history.length === 0 ? (
+                    <div className="bg-white rounded-[2rem] p-12 text-center text-gray-400 border border-black/5">هنوز تاریخچه‌ای ثبت نشده است.</div>
+                  ) : (
+                    history.map(q => (
+                      <div key={q.id} className="bg-white p-6 rounded-[2rem] shadow-sm border border-black/5">
+                        <div className="text-xs text-gray-400 mb-2">{new Date(q.created_at).toLocaleDateString(lang === 'fa' ? 'fa-IR' : 'en-US')}</div>
+                        <div className="font-bold mb-4 text-gray-900">{q.problem}</div>
+                        <div className="prose-custom line-clamp-2 text-gray-500 text-sm mb-4">{renderMarkdown(q.answer)}</div>
+                        <button onClick={() => { setProblem(q.problem); setResult(q.answer); setGeneratedImages(q.images); setStep('chat'); }} className="text-sm text-emerald-600 font-bold hover:underline">مشاهده کامل</button>
+                      </div>
+                    ))
+                  )}
                 </div>
               </motion.div>
             )}
 
             {step === 'public' && (
               <motion.div key="public" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} className="space-y-6">
-                <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center justify-between mb-6">
                   <h2 className="text-2xl font-bold">{t.public}</h2>
                   <button onClick={() => setStep('chat')} className="p-2 bg-white rounded-xl shadow-sm border border-gray-100 text-gray-500"><ChevronRight className={`w-6 h-6 ${dir === 'rtl' ? '' : 'rotate-180'}`} /></button>
                 </div>
                 <div className="grid gap-4">
                   {publicFeed.map(q => (
-                    <div key={q.id} className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+                    <div key={q.id} className="bg-white p-6 rounded-[2rem] shadow-sm border border-black/5">
                       <div className="flex items-center gap-2 mb-2">
                         <div className="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center"><User className="w-4 h-4 text-gray-400" /></div>
-                        <span className="text-xs text-gray-500 font-bold">{q.user_phone || t.anonymous}</span>
+                        <span className="text-xs text-gray-500 font-bold">{q.user_id_text || t.anonymous}</span>
                       </div>
                       <div className="font-bold mb-4 text-gray-900">{q.problem}</div>
                       <div className="text-sm text-gray-600 line-clamp-3 mb-4">{q.answer.substring(0, 200)}...</div>
-                      <button onClick={() => { setResult(q.answer); setGeneratedImages(q.images); setStep('chat'); }} className="text-sm text-emerald-600 font-bold hover:underline">{t.chat}</button>
+                      <button onClick={() => { setProblem(q.problem); setResult(q.answer); setGeneratedImages(q.images); setStep('chat'); }} className="text-sm text-emerald-600 font-bold hover:underline">مشاهده تحلیل</button>
+                    </div>
+                  ))}
+                </div>
+              </motion.div>
+            )}
+
+            {step === 'discover' && (
+              <motion.div key="discover" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+                <h2 className="text-2xl font-bold mb-6">{t.discover}</h2>
+                <div className="grid grid-cols-1 gap-6">
+                  {PODCASTS_DB.slice(0, 10).map((p) => (
+                    <div key={p.id} className="bg-white rounded-[2.5rem] overflow-hidden shadow-sm border border-black/5 group">
+                      <div className="relative aspect-video bg-emerald-900 flex items-center justify-center overflow-hidden">
+                        <img src={`https://picsum.photos/seed/${p.id}/800/450`} className="absolute inset-0 w-full h-full object-cover opacity-50 group-hover:scale-110 transition-all duration-700" referrerPolicy="no-referrer" />
+                        <button className="relative z-10 w-16 h-16 bg-white/20 backdrop-blur-md rounded-full flex items-center justify-center text-white hover:bg-emerald-600 transition-all">
+                          <Play className="w-8 h-8 fill-current" />
+                        </button>
+                        <div className="absolute bottom-4 left-4 right-4 flex justify-between items-center text-white text-xs font-bold">
+                          <span className="bg-black/40 px-3 py-1 rounded-full backdrop-blur-sm"># {p.id}</span>
+                          <span className="bg-emerald-600 px-3 py-1 rounded-full">3:15</span>
+                        </div>
+                      </div>
+                      <div className="p-8">
+                        <h3 className="font-bold text-xl mb-2">{p.title}</h3>
+                        <p className="text-gray-500 text-sm mb-6">نکته طلایی: {p.title.split('(')[0]}</p>
+                        <div className="flex gap-2">
+                           <button className="flex-1 py-3 bg-gray-50 hover:bg-emerald-50 text-gray-600 hover:text-emerald-700 rounded-xl font-bold transition-all flex items-center justify-center gap-2">
+                             <Share2 className="w-4 h-4" /> اشتراک‌گذاری
+                           </button>
+                           <button onClick={() => { setStep('chat'); setProblem(`درباره پادکست شماره ${p.id} (${p.title}) بیشتر توضیح بده.`); }} className="flex-1 py-3 bg-emerald-600 text-white rounded-xl font-bold transition-all shadow-lg shadow-emerald-600/20">
+                             تحلیل هوشمند
+                           </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </motion.div>
+            )}
+
+            {step === 'journal' && (
+              <motion.div key="journal" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+                <h2 className="text-2xl font-bold mb-2">{t.journal}</h2>
+                <p className="text-gray-500 mb-8">امروز چه حسی داری؟ بنویس تا دکتر راهنماییت کنه و پادکست مناسب رو بهت پیشنهاد بده.</p>
+                <div className="bg-white rounded-[2.5rem] p-8 shadow-sm border border-black/5">
+                  <textarea 
+                    value={problem} 
+                    onChange={(e) => setProblem(e.target.value)} 
+                    placeholder={t.moodPlaceholder} 
+                    className="w-full h-48 p-6 bg-gray-50 rounded-3xl border-none focus:ring-2 focus:ring-emerald-500 transition-all resize-none mb-6 text-xl" 
+                  />
+                  <button 
+                    onClick={handleAnalyze} 
+                    disabled={isLoading || !problem.trim()} 
+                    className="w-full py-5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl font-bold transition-all shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-2"
+                  >
+                    {isLoading ? <Loader2 className="animate-spin" /> : t.saveMood}
+                  </button>
+                </div>
+                {result && (
+                  <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-emerald-50 rounded-[2.5rem] p-8 border border-emerald-100">
+                    <div className="flex items-center gap-3 mb-4 text-emerald-700 font-bold">
+                      <Sparkles className="w-6 h-6" />
+                      تحلیل هوشمند احساس شما
+                    </div>
+                    <div className="prose-custom text-emerald-900 leading-relaxed mb-6">
+                      {renderMarkdown(result)}
+                    </div>
+                  </motion.div>
+                )}
+              </motion.div>
+            )}
+
+            {step === 'glossary' && (
+              <motion.div key="glossary" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+                <h2 className="text-2xl font-bold mb-6">{t.glossary}</h2>
+                <div className="relative mb-8">
+                  <Search className="absolute right-6 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
+                  <input type="text" placeholder="جستجوی مفاهیم (مثلاً: کمال‌گرایی، گابا...)" className="w-full p-6 pr-14 bg-white rounded-3xl shadow-sm border border-black/5 focus:ring-2 focus:ring-emerald-500 transition-all" />
+                </div>
+                <div className="grid grid-cols-1 gap-4">
+                  {[
+                    { term: 'کمال‌گرایی (Perfectionism)', desc: 'تمایل به تعیین استانداردهای بسیار بالا و نقد شدید خود.', podcast: 101 },
+                    { term: 'گابا (GABA)', desc: 'یک پیام‌رسان عصبی که فعالیت مغز را کاهش داده و باعث آرامش می‌شود.', podcast: 187 },
+                    { term: 'طردشدگی (Social Rejection)', desc: 'تجربه دردناک کنار گذاشته شدن از گروه‌های اجتماعی.', podcast: 159 },
+                    { term: 'پذیرش بدون شرط', desc: 'مفهومی در روان‌درمانی مراجع‌محور برای ایجاد امنیت روانی.', podcast: 58 },
+                  ].map((item, i) => (
+                    <div key={i} className="bg-white rounded-3xl p-6 shadow-sm border border-black/5 hover:border-emerald-200 transition-all group">
+                      <div className="flex justify-between items-start mb-2">
+                        <h3 className="font-bold text-lg text-gray-900 group-hover:text-emerald-700">{item.term}</h3>
+                        <button onClick={() => { setStep('chat'); setProblem(`درباره مفهوم ${item.term} بیشتر توضیح بده و بگو در کدام پادکست‌ها به آن اشاره شده است.`); }} className="text-xs text-emerald-600 font-bold bg-emerald-50 px-3 py-1 rounded-full">مشاهده تحلیل</button>
+                      </div>
+                      <p className="text-gray-500 text-sm leading-relaxed">{item.desc}</p>
+                    </div>
+                  ))}
+                </div>
+              </motion.div>
+            )}
+            {step === 'quizzes' && (
+              <motion.div key="quizzes" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+                <h2 className="text-2xl font-bold mb-6">{t.quizzes}</h2>
+                <div className="grid grid-cols-1 gap-4">
+                  {[
+                    { title: 'آیا شما دچار خطای تایید هستید؟', questions: 5, icon: Brain, color: 'bg-purple-50 text-purple-600' },
+                    { title: 'تست کمال‌گرایی دکتر مکری', questions: 10, icon: Sparkles, color: 'bg-emerald-50 text-emerald-600' },
+                    { title: 'ارزیابی سطح استرس و اضطراب', questions: 8, icon: Zap, color: 'bg-amber-50 text-amber-600' },
+                  ].map((quiz, i) => (
+                    <div key={i} className="bg-white rounded-[2rem] p-8 shadow-sm border border-black/5 flex items-center justify-between group hover:border-emerald-200 transition-all">
+                      <div className="flex items-center gap-6">
+                        <div className={`p-4 rounded-2xl ${quiz.color}`}>
+                          <quiz.icon className="w-8 h-8" />
+                        </div>
+                        <div>
+                          <h3 className="font-bold text-lg mb-1">{quiz.title}</h3>
+                          <p className="text-xs text-gray-400">{quiz.questions} سوال • ۵ دقیقه</p>
+                        </div>
+                      </div>
+                      <button onClick={() => { setStep('chat'); setProblem(`می‌خواهم آزمون "${quiz.title}" را بدهم. لطفاً سوال اول را بپرس.`); }} className="w-12 h-12 bg-gray-50 rounded-full flex items-center justify-center text-gray-400 group-hover:bg-emerald-600 group-hover:text-white transition-all">
+                        <ChevronRight className={`w-6 h-6 ${dir === 'rtl' ? '' : 'rotate-180'}`} />
+                      </button>
                     </div>
                   ))}
                 </div>
@@ -873,6 +1124,32 @@ User's Problem: ${problem}
             )}
           </AnimatePresence>
         </main>
+        {user && (
+          <nav className="fixed bottom-0 left-0 right-0 bg-white/80 backdrop-blur-xl border-t border-gray-100 p-4 pb-8 z-40 md:hidden">
+            <div className="flex justify-around items-center">
+              <button onClick={() => setStep('chat')} className={`flex flex-col items-center gap-1 ${step === 'chat' ? 'text-emerald-600' : 'text-gray-400'}`}>
+                <MessageSquare className="w-6 h-6" />
+                <span className="text-[10px] font-bold">{t.chat}</span>
+              </button>
+              <button onClick={() => setStep('discover')} className={`flex flex-col items-center gap-1 ${step === 'discover' ? 'text-emerald-600' : 'text-gray-400'}`}>
+                <Play className="w-6 h-6" />
+                <span className="text-[10px] font-bold">{t.discover}</span>
+              </button>
+              <button onClick={() => setStep('quizzes')} className={`flex flex-col items-center gap-1 ${step === 'quizzes' ? 'text-emerald-600' : 'text-gray-400'}`}>
+                <Sparkles className="w-6 h-6" />
+                <span className="text-[10px] font-bold">{t.quizzes}</span>
+              </button>
+              <button onClick={() => setStep('journal')} className={`flex flex-col items-center gap-1 ${step === 'journal' ? 'text-emerald-600' : 'text-gray-400'}`}>
+                <BookOpen className="w-6 h-6" />
+                <span className="text-[10px] font-bold">{t.journal}</span>
+              </button>
+              <button onClick={() => setStep('glossary')} className={`flex flex-col items-center gap-1 ${step === 'glossary' ? 'text-emerald-600' : 'text-gray-400'}`}>
+                <Search className="w-6 h-6" />
+                <span className="text-[10px] font-bold">{t.glossary}</span>
+              </button>
+            </div>
+          </nav>
+        )}
       </div>
     </div>
   );
