@@ -1,0 +1,91 @@
+@import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@100;300;400;500;700;900&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Vazirmatn", ui-sans-serif, system-ui, sans-serif;
+}
+
+@layer base {
+  html {
+    -webkit-tap-highlight-color: transparent;
+    scroll-behavior: smooth;
+  }
+  
+  body {
+    @apply bg-[#f8f9fa] text-[#333333] antialiased;
+    font-size: 18px;
+    line-height: 1.7;
+  }
+}
+
+/* Typography & Readability Improvements */
+.markdown-body {
+  @apply text-right;
+  color: #333333;
+}
+
+.markdown-body p {
+  @apply mb-8 text-lg leading-[1.8];
+  text-align: right;
+}
+
+.markdown-body h1, .markdown-body h2, .markdown-body h3 {
+  @apply font-bold text-gray-900 mb-8 mt-12 leading-tight;
+}
+
+.markdown-body h2 { @apply text-3xl border-b border-gray-100 pb-4; }
+.markdown-body h3 { @apply text-2xl; }
+
+.markdown-body ul, .markdown-body ol {
+  @apply mb-10 pr-8 space-y-6;
+}
+
+.markdown-body li {
+  @apply relative pr-2 text-lg leading-relaxed;
+}
+
+/* Custom Callout Boxes */
+.callout-box {
+  @apply my-12 rounded-[2.5rem] overflow-hidden border shadow-sm transition-all hover:shadow-md;
+}
+
+.callout-box-header {
+  @apply p-6 font-bold flex items-center gap-3 text-white;
+}
+
+.callout-box-body {
+  @apply p-10 leading-relaxed text-xl;
+}
+
+/* Step/List Item Styling */
+.step-item {
+  @apply flex gap-6 mb-10 items-start;
+}
+
+.step-number {
+  @apply flex-shrink-0 w-12 h-12 rounded-full bg-emerald-600 text-white flex items-center justify-center font-bold text-xl shadow-lg shadow-emerald-600/20;
+}
+
+.step-content {
+  @apply flex-1 pt-2;
+}
+
+/* Image Loading Animation */
+@keyframes rotate-slow {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.animate-rotate-slow {
+  animation: rotate-slow 8s linear infinite;
+}
+
+/* Whitespace & Chunking */
+.section-divider {
+  @apply my-20 h-px bg-gradient-to-r from-transparent via-gray-200 to-transparent;
+}
+
+/* Prose overrides for ReactMarkdown */
+.prose-custom blockquote {
+  @apply bg-emerald-50/50 p-8 rounded-[2rem] border-r-8 border-emerald-500 my-10 italic text-xl text-emerald-900;
+}
