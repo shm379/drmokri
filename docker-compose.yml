@@ -1,0 +1,34 @@
+# Coolify deployment for the Dr. Mokri smart assistant.
+#
+# In Coolify create a new resource of type "Docker Compose" pointing at this
+# repository. Coolify provides the reverse proxy / TLS, so only the container
+# port needs to be exposed.
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # Baked into the client bundle by Vite at build time.
+        - GEMINI_API_KEY=${GEMINI_API_KEY}
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DATABASE_PATH=/data/mokri_assistant.db
+      # Optional: public URL of the deployment (used for self-referential links)
+      - APP_URL=${APP_URL}
+    ports:
+      - "3000"
+    volumes:
+      # Persist the SQLite database across redeploys
+      - mokri-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/api/public-feed',r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  mokri-data:

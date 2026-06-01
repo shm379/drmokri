@@ -10,7 +10,8 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const db = new Database("mokri_assistant.db");
+const DB_PATH = process.env.DATABASE_PATH || "mokri_assistant.db";
+const db = new Database(DB_PATH);
 
 // Initialize Database
 db.exec(`
@@ -61,7 +62,7 @@ db.exec(`
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
 
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
