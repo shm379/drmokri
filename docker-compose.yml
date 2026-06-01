@@ -8,15 +8,18 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      args:
-        # Baked into the client bundle by Vite at build time.
-        - GEMINI_API_KEY=${GEMINI_API_KEY}
     environment:
       - NODE_ENV=production
       - PORT=3000
       - DATABASE_PATH=/data/mokri_assistant.db
       # Optional: public URL of the deployment (used for self-referential links)
       - APP_URL=${APP_URL}
+      # Text completions go through the NabuGate gateway when set.
+      - NABU_GATEWAY_URL=${NABU_GATEWAY_URL}
+      - NABU_API_KEY=${NABU_API_KEY}
+      - NABU_MODEL=${NABU_MODEL:-nabu-smart}
+      # Used for image generation and TTS (and as text fallback if NabuGate is unset).
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
     ports:
       - "3000"
     volumes:

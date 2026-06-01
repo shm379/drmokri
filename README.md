@@ -28,9 +28,10 @@ deployed to a self-hosted [Coolify](https://coolify.io) instance.
 
 1. In Coolify, create a new **Resource → Docker Compose** and point it at this
    Git repository (it auto-detects `docker-compose.yml`).
-2. Add the following **Environment Variables** in the resource settings:
-   - `GEMINI_API_KEY` — your Gemini API key. Mark it as a **Build Variable** so
-     Vite can inline it into the client bundle at build time.
+2. Add the following **Environment Variables** (all runtime — no build secrets):
+   - `GEMINI_API_KEY` — Gemini key for image/TTS (and text fallback).
+   - `NABU_GATEWAY_URL`, `NABU_API_KEY`, `NABU_MODEL` — to route text through
+     NabuGate (see the [AI backend](#ai-backend) section).
    - `APP_URL` — the public URL Coolify assigns to the app (optional).
 3. Coolify provisions the `mokri-data` volume automatically, which persists the
    SQLite database (`/data/mokri_assistant.db`) across redeploys.
@@ -40,24 +41,43 @@ deployed to a self-hosted [Coolify](https://coolify.io) instance.
 ### Option B — Dockerfile
 
 1. Create a new **Resource → Dockerfile** (or Application) pointing at this repo.
-2. Add the build argument / variable `GEMINI_API_KEY` (Build Variable).
+2. Add the runtime environment variables (`GEMINI_API_KEY`, and optionally the
+   `NABU_*` vars — see [AI backend](#ai-backend)).
 3. Set the port to **3000**.
 4. Add a **Persistent Storage** mount at `/data` so the SQLite database survives
    redeploys.
 5. Click **Deploy**.
 
+### AI backend
+
+All AI calls run **server-side** — no API key is shipped to the browser. Text
+analysis is sent to the [NabuGate gateway](nabu-gateway/) when configured;
+otherwise the server calls Gemini directly. Image generation and TTS call Gemini
+server-side.
+
+- Set `NABU_GATEWAY_URL` (+ `NABU_API_KEY`, `NABU_MODEL`) to route text through
+  NabuGate.
+- Set `GEMINI_API_KEY` for image generation / TTS (and as the text fallback when
+  NabuGate is not configured).
+
 ### Environment variables
 
-| Variable         | Where        | Description                                              |
-| ---------------- | ------------ | -------------------------------------------------------- |
-| `GEMINI_API_KEY` | Build time   | Gemini API key, inlined into the client bundle by Vite.  |
-| `PORT`           | Runtime      | Port the server listens on (default `3000`).             |
-| `DATABASE_PATH`  | Runtime      | SQLite file path (default `/data/mokri_assistant.db`).   |
-| `APP_URL`        | Runtime      | Public URL of the deployment (optional).                 |
+| Variable           | Where    | Description                                                       |
+| ------------------ | -------- | ----------------------------------------------------------------- |
+| `GEMINI_API_KEY`   | Runtime  | Gemini key for image/TTS (and text fallback). Server-side only.   |
+| `NABU_GATEWAY_URL` | Runtime  | NabuGate base URL for text completions (e.g. `http://nabugate:8080`). |
+| `NABU_API_KEY`     | Runtime  | Internal API key sent to NabuGate.                                |
+| `NABU_MODEL`       | Runtime  | NabuGate alias to use (default `nabu-smart`).                     |
+| `PORT`             | Runtime  | Port the server listens on (default `3000`).                      |
+| `DATABASE_PATH`    | Runtime  | SQLite file path (default `/data/mokri_assistant.db`).            |
+| `APP_URL`          | Runtime  | Public URL of the deployment (optional).                          |
 
 ### Build & run locally with Docker
 
 ```bash
-docker build --build-arg GEMINI_API_KEY=your_key_here -t drmokri .
-docker run -p 3000:3000 -v drmokri-data:/data drmokri
+docker build -t drmokri .
+docker run -p 3000:3000 -v drmokri-data:/data \
+  -e GEMINI_API_KEY=your_key_here \
+  -e NABU_GATEWAY_URL=http://host.docker.internal:8080 -e NABU_API_KEY=nabu_dev_key_change_me \
+  drmokri
 ```

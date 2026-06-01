@@ -19,12 +19,8 @@ RUN npm ci
 # Copy the rest of the source
 COPY . .
 
-# GEMINI_API_KEY is injected into the client bundle by Vite at build time.
-# In Coolify, set it as a *Build Variable* so it is available here.
-ARG GEMINI_API_KEY
-ENV GEMINI_API_KEY=$GEMINI_API_KEY
-
-# Produce the production client bundle in /app/dist
+# The client no longer embeds any API key — all AI calls go through the server
+# (NabuGate gateway or Gemini), so the build needs no secrets.
 RUN npm run build
 
 ############################

@@ -4,8 +4,21 @@ import Database from "better-sqlite3";
 import path from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
+import { GoogleGenAI, Modality } from "@google/genai";
 
 dotenv.config();
+
+// --- AI configuration ---
+// Text completions are routed through the NabuGate gateway when configured.
+// Image generation and TTS still call Gemini directly (the gateway MVP is
+// text-only). Keeping these server-side means no API key ships in the client.
+const NABU_GATEWAY_URL = process.env.NABU_GATEWAY_URL || "";
+const NABU_API_KEY = process.env.NABU_API_KEY || "";
+const NABU_MODEL = process.env.NABU_MODEL || "nabu-smart";
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
+const GEMINI_TEXT_MODEL = process.env.GEMINI_TEXT_MODEL || "gemini-3-flash-preview";
+const GEMINI_IMAGE_MODEL = process.env.GEMINI_IMAGE_MODEL || "gemini-2.5-flash-image";
+const GEMINI_TTS_MODEL = process.env.GEMINI_TTS_MODEL || "gemini-2.5-flash-preview-tts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -59,6 +72,48 @@ db.exec(`
     FOREIGN KEY(user_id) REFERENCES users(id)
   );
 `);
+
+// runChat sends a chat completion. It prefers the NabuGate gateway (so every
+// project shares one routing/fallback/secret layer); if the gateway is not
+// configured it falls back to calling Gemini directly.
+async function runChat(
+  messages: { role: string; content: string }[],
+  temperature?: number,
+): Promise<{ content: string; provider: string }> {
+  if (NABU_GATEWAY_URL) {
+    const resp = await fetch(`${NABU_GATEWAY_URL.replace(/\/$/, "")}/v1/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(NABU_API_KEY ? { Authorization: `Bearer ${NABU_API_KEY}` } : {}),
+      },
+      body: JSON.stringify({ model: NABU_MODEL, messages, temperature }),
+    });
+    if (!resp.ok) {
+      throw new Error(`NabuGate error ${resp.status}: ${await resp.text()}`);
+    }
+    const data: any = await resp.json();
+    return { content: data.choices?.[0]?.message?.content || "", provider: data.provider || "nabugate" };
+  }
+
+  if (!GEMINI_API_KEY) {
+    throw new Error("No AI backend configured (set NABU_GATEWAY_URL or GEMINI_API_KEY)");
+  }
+  const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+  const systemText = messages.filter(m => m.role === "system").map(m => m.content).join("\n\n");
+  const contents = messages
+    .filter(m => m.role !== "system")
+    .map(m => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.content }] }));
+  const response = await ai.models.generateContent({
+    model: GEMINI_TEXT_MODEL,
+    contents,
+    config: {
+      temperature: temperature ?? 0.8,
+      ...(systemText ? { systemInstruction: systemText } : {}),
+    },
+  });
+  return { content: response.text || "", provider: "gemini" };
+}
 
 async function startServer() {
   const app = express();
@@ -132,6 +187,74 @@ async function startServer() {
       }));
     } catch (err) {
       res.status(500).json({ error: "Failed to fetch public feed" });
+    }
+  });
+
+  // --- AI endpoints (server-side; keeps API keys out of the client) ---
+
+  // Text analysis — routed through NabuGate (or Gemini fallback).
+  app.post("/api/analyze", async (req, res) => {
+    const { messages, temperature } = req.body;
+    if (!Array.isArray(messages) || messages.length === 0) {
+      return res.status(400).json({ error: "messages is required" });
+    }
+    try {
+      const result = await runChat(messages, temperature);
+      res.json(result);
+    } catch (err: any) {
+      console.error("analyze error:", err?.message || err);
+      res.status(502).json({ error: "AI request failed" });
+    }
+  });
+
+  // Image generation — Gemini (the gateway MVP is text-only).
+  app.post("/api/generate-image", async (req, res) => {
+    const { prompt } = req.body;
+    if (!prompt) return res.status(400).json({ error: "prompt is required" });
+    if (!GEMINI_API_KEY) return res.status(503).json({ error: "Image generation not configured" });
+    try {
+      const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+      const imageResponse = await ai.models.generateContent({
+        model: GEMINI_IMAGE_MODEL,
+        contents: [{ text: prompt }],
+        config: { imageConfig: { aspectRatio: "16:9" } },
+      });
+      const part = imageResponse.candidates?.[0]?.content?.parts?.find((p: any) => p.inlineData);
+      if (part?.inlineData) {
+        res.json({ image: `data:image/png;base64,${part.inlineData.data}` });
+      } else {
+        res.status(502).json({ error: "No image returned" });
+      }
+    } catch (err: any) {
+      console.error("image error:", err?.message || err);
+      res.status(502).json({ error: "Image generation failed" });
+    }
+  });
+
+  // Text-to-speech — Gemini. Returns raw base64 PCM; the client wraps it as WAV.
+  app.post("/api/tts", async (req, res) => {
+    const { text, voice } = req.body;
+    if (!text) return res.status(400).json({ error: "text is required" });
+    if (!GEMINI_API_KEY) return res.status(503).json({ error: "TTS not configured" });
+    try {
+      const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+      const response = await ai.models.generateContent({
+        model: GEMINI_TTS_MODEL,
+        contents: [{ parts: [{ text }] }],
+        config: {
+          responseModalities: [Modality.AUDIO],
+          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice || "Kore" } } },
+        },
+      });
+      const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+      if (base64Audio) {
+        res.json({ audioBase64: base64Audio });
+      } else {
+        res.status(502).json({ error: "No audio returned" });
+      }
+    } catch (err: any) {
+      console.error("tts error:", err?.message || err);
+      res.status(502).json({ error: "TTS failed" });
     }
   });
 

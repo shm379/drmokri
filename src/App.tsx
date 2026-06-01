@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef } from 'react';
-import { GoogleGenAI, Modality } from "@google/genai";
 import ReactMarkdown from 'react-markdown';
 import { 
   Brain, 
@@ -399,21 +398,15 @@ export default function App() {
 
     setIsSpeaking(true);
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash-preview-tts",
-        contents: [{ parts: [{ text: text }] }],
-        config: {
-          responseModalities: [Modality.AUDIO],
-          speechConfig: {
-            voiceConfig: {
-              prebuiltVoiceConfig: { voiceName: 'Kore' },
-            },
-          },
-        },
+      const ttsRes = await fetch('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, voice: 'Kore' }),
       });
+      if (!ttsRes.ok) throw new Error('TTS request failed');
+      const { audioBase64 } = await ttsRes.json();
 
-      const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+      const base64Audio = audioBase64;
       if (base64Audio) {
         const pcmData = Uint8Array.from(atob(base64Audio), c => c.charCodeAt(0));
         const wavHeader = new ArrayBuffer(44);
@@ -514,15 +507,7 @@ export default function App() {
       const trait = personality ? PERSONALITY_TRAITS[personality] : PERSONALITY_TRAITS.logical;
       const style = RESPONSE_STYLES.find(s => s.id === responseStyle) || RESPONSE_STYLES[0];
 
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: [
-          {
-            role: "user",
-            parts: [{
-              text: `
+      const promptText = `
 Role: You are the "Dr. Azarakhsh Mokri Smart Assistant". Respond in: ${lang}.
 Style: ${style.label[lang] || style.label.fa}.
 User Personality: ${trait.label[lang] || trait.label.fa}.
@@ -545,31 +530,36 @@ Instructions:
 ${contextText}
 
 User's Problem: ${problem}
-`
-            }]
-          }
-        ],
-        config: {
-          temperature: 0.8,
-        }
-      });
+`;
 
-      const textResult = response.text || "No response received.";
+      const analyzeRes = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: [{ role: 'user', content: promptText }],
+          temperature: 0.8,
+        }),
+      });
+      if (!analyzeRes.ok) throw new Error('Analyze request failed');
+      const analyzeData = await analyzeRes.json();
+
+      const textResult = analyzeData.content || "No response received.";
       setResult(textResult);
 
       const imgs: string[] = [];
       if (isArticleMode) {
         try {
           for (let i = 0; i < 3; i++) {
-            const imageResponse = await ai.models.generateContent({
-              model: 'gemini-2.5-flash-image',
-              contents: [{
-                text: `A professional, minimal, and purely conceptual psychological illustration for: ${problem}. No text. Symbolic representation. Style: soft colors, clean, high quality.`,
-              }],
-              config: { imageConfig: { aspectRatio: "16:9" } }
+            const imageRes = await fetch('/api/generate-image', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                prompt: `A professional, minimal, and purely conceptual psychological illustration for: ${problem}. No text. Symbolic representation. Style: soft colors, clean, high quality.`,
+              }),
             });
-            const part = imageResponse.candidates[0].content.parts.find(p => p.inlineData);
-            if (part?.inlineData) imgs.push(`data:image/png;base64,${part.inlineData.data}`);
+            if (!imageRes.ok) continue;
+            const imageData = await imageRes.json();
+            if (imageData.image) imgs.push(imageData.image);
           }
           setGeneratedImages(imgs);
         } catch (imgErr) {
