@@ -51,23 +51,25 @@ deployed to a self-hosted [Coolify](https://coolify.io) instance.
 ### AI backend
 
 All AI calls run **server-side** — no API key is shipped to the browser. Text
-analysis is sent to the [NabuGate gateway](nabu-gateway/) when configured;
-otherwise the server calls Gemini directly. Image generation and TTS call Gemini
-server-side.
+analysis, image generation, and text-to-speech are all sent to the
+[NabuGate gateway](nabu-gateway/) when configured; otherwise the server calls
+Gemini directly.
 
-- Set `NABU_GATEWAY_URL` (+ `NABU_API_KEY`, `NABU_MODEL`) to route text through
-  NabuGate.
-- Set `GEMINI_API_KEY` for image generation / TTS (and as the text fallback when
-  NabuGate is not configured).
+- Set `NABU_GATEWAY_URL` (+ `NABU_API_KEY`, `NABU_MODEL`, `NABU_IMAGE_MODEL`,
+  `NABU_AUDIO_MODEL`) to route everything through NabuGate.
+- Set `GEMINI_API_KEY` as the fallback for text/image/TTS when NabuGate is not
+  configured.
 
 ### Environment variables
 
 | Variable           | Where    | Description                                                       |
 | ------------------ | -------- | ----------------------------------------------------------------- |
-| `GEMINI_API_KEY`   | Runtime  | Gemini key for image/TTS (and text fallback). Server-side only.   |
-| `NABU_GATEWAY_URL` | Runtime  | NabuGate base URL for text completions (e.g. `http://nabugate:8080`). |
+| `GEMINI_API_KEY`   | Runtime  | Gemini fallback for text/image/TTS. Server-side only.             |
+| `NABU_GATEWAY_URL` | Runtime  | NabuGate base URL (e.g. `http://nabugate:8080`).                  |
 | `NABU_API_KEY`     | Runtime  | Internal API key sent to NabuGate.                                |
-| `NABU_MODEL`       | Runtime  | NabuGate alias to use (default `nabu-smart`).                     |
+| `NABU_MODEL`       | Runtime  | NabuGate text alias (default `nabu-smart`).                       |
+| `NABU_IMAGE_MODEL` | Runtime  | NabuGate image alias (default `nabu-image`).                      |
+| `NABU_AUDIO_MODEL` | Runtime  | NabuGate speech alias (default `nabu-voice`).                     |
 | `PORT`             | Runtime  | Port the server listens on (default `3000`).                      |
 | `DATABASE_PATH`    | Runtime  | SQLite file path (default `/data/mokri_assistant.db`).            |
 | `APP_URL`          | Runtime  | Public URL of the deployment (optional).                          |

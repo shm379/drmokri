@@ -404,30 +404,14 @@ export default function App() {
         body: JSON.stringify({ text, voice: 'Kore' }),
       });
       if (!ttsRes.ok) throw new Error('TTS request failed');
-      const { audioBase64 } = await ttsRes.json();
+      const { audioBase64, mimeType } = await ttsRes.json();
 
-      const base64Audio = audioBase64;
-      if (base64Audio) {
-        const pcmData = Uint8Array.from(atob(base64Audio), c => c.charCodeAt(0));
-        const wavHeader = new ArrayBuffer(44);
-        const view = new DataView(wavHeader);
-        view.setUint32(0, 0x52494646, false);
-        view.setUint32(4, 36 + pcmData.length, true);
-        view.setUint32(8, 0x57415645, false);
-        view.setUint32(12, 0x666d7420, false);
-        view.setUint32(16, 16, true);
-        view.setUint16(20, 1, true);
-        view.setUint16(22, 1, true);
-        view.setUint32(24, 24000, true);
-        view.setUint32(28, 24000 * 2, true);
-        view.setUint16(32, 2, true);
-        view.setUint16(34, 16, true);
-        view.setUint32(36, 0x64617461, false);
-        view.setUint32(40, pcmData.length, true);
-
-        const blob = new Blob([wavHeader, pcmData], { type: 'audio/wav' });
+      if (audioBase64) {
+        // The server returns a complete, playable audio file (WAV or MP3).
+        const bytes = Uint8Array.from(atob(audioBase64), c => c.charCodeAt(0));
+        const blob = new Blob([bytes], { type: mimeType || 'audio/wav' });
         const audioUrl = URL.createObjectURL(blob);
-        
+
         if (audioRef.current) {
           audioRef.current.src = audioUrl;
           audioRef.current.play().catch(e => console.error("Playback failed", e));

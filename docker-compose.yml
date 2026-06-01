@@ -18,7 +18,9 @@ services:
       - NABU_GATEWAY_URL=${NABU_GATEWAY_URL}
       - NABU_API_KEY=${NABU_API_KEY}
       - NABU_MODEL=${NABU_MODEL:-nabu-smart}
-      # Used for image generation and TTS (and as text fallback if NabuGate is unset).
+      - NABU_IMAGE_MODEL=${NABU_IMAGE_MODEL:-nabu-image}
+      - NABU_AUDIO_MODEL=${NABU_AUDIO_MODEL:-nabu-voice}
+      # Fallback for image/TTS/text when NabuGate is not configured.
       - GEMINI_API_KEY=${GEMINI_API_KEY}
     ports:
       - "3000"

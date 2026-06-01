@@ -15,6 +15,8 @@ dotenv.config();
 const NABU_GATEWAY_URL = process.env.NABU_GATEWAY_URL || "";
 const NABU_API_KEY = process.env.NABU_API_KEY || "";
 const NABU_MODEL = process.env.NABU_MODEL || "nabu-smart";
+const NABU_IMAGE_MODEL = process.env.NABU_IMAGE_MODEL || "nabu-image";
+const NABU_AUDIO_MODEL = process.env.NABU_AUDIO_MODEL || "nabu-voice";
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
 const GEMINI_TEXT_MODEL = process.env.GEMINI_TEXT_MODEL || "gemini-3-flash-preview";
 const GEMINI_IMAGE_MODEL = process.env.GEMINI_IMAGE_MODEL || "gemini-2.5-flash-image";
@@ -115,6 +117,93 @@ async function runChat(
   return { content: response.text || "", provider: "gemini" };
 }
 
+// pcmToWav wraps raw mono 16-bit PCM in a WAV container (used for the
+// Gemini-direct TTS path; the gateway already returns a complete audio file).
+function pcmToWav(pcm: Buffer, sampleRate: number): Buffer {
+  const numChannels = 1, bitsPerSample = 16;
+  const byteRate = (sampleRate * numChannels * bitsPerSample) / 8;
+  const blockAlign = (numChannels * bitsPerSample) / 8;
+  const header = Buffer.alloc(44);
+  header.write("RIFF", 0);
+  header.writeUInt32LE(36 + pcm.length, 4);
+  header.write("WAVE", 8);
+  header.write("fmt ", 12);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(numChannels, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(byteRate, 28);
+  header.writeUInt16LE(blockAlign, 32);
+  header.writeUInt16LE(bitsPerSample, 34);
+  header.write("data", 36);
+  header.writeUInt32LE(pcm.length, 40);
+  return Buffer.concat([header, pcm]);
+}
+
+// runImage generates one image via NabuGate (or Gemini fallback) and returns a
+// ready-to-use data URL.
+async function runImage(prompt: string): Promise<string | null> {
+  if (NABU_GATEWAY_URL) {
+    const resp = await fetch(`${NABU_GATEWAY_URL.replace(/\/$/, "")}/v1/images/generations`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(NABU_API_KEY ? { Authorization: `Bearer ${NABU_API_KEY}` } : {}),
+      },
+      body: JSON.stringify({ model: NABU_IMAGE_MODEL, prompt, n: 1, aspect_ratio: "16:9" }),
+    });
+    if (!resp.ok) throw new Error(`NabuGate image error ${resp.status}: ${await resp.text()}`);
+    const data: any = await resp.json();
+    const b64 = data.data?.[0]?.b64_json;
+    return b64 ? `data:image/png;base64,${b64}` : null;
+  }
+
+  if (!GEMINI_API_KEY) throw new Error("Image generation not configured");
+  const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+  const imageResponse = await ai.models.generateContent({
+    model: GEMINI_IMAGE_MODEL,
+    contents: [{ text: prompt }],
+    config: { imageConfig: { aspectRatio: "16:9" } },
+  });
+  const part = imageResponse.candidates?.[0]?.content?.parts?.find((p: any) => p.inlineData);
+  return part?.inlineData ? `data:image/png;base64,${part.inlineData.data}` : null;
+}
+
+// runSpeech synthesizes speech via NabuGate (returns the provider's audio file)
+// or Gemini directly (raw PCM wrapped to WAV here). Always returns a playable
+// base64 file plus its MIME type.
+async function runSpeech(text: string, voice?: string): Promise<{ audioBase64: string; mimeType: string } | null> {
+  if (NABU_GATEWAY_URL) {
+    const resp = await fetch(`${NABU_GATEWAY_URL.replace(/\/$/, "")}/v1/audio/speech`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(NABU_API_KEY ? { Authorization: `Bearer ${NABU_API_KEY}` } : {}),
+      },
+      body: JSON.stringify({ model: NABU_AUDIO_MODEL, input: text, voice }),
+    });
+    if (!resp.ok) throw new Error(`NabuGate tts error ${resp.status}: ${await resp.text()}`);
+    const mimeType = resp.headers.get("content-type") || "audio/mpeg";
+    const buf = Buffer.from(await resp.arrayBuffer());
+    return { audioBase64: buf.toString("base64"), mimeType };
+  }
+
+  if (!GEMINI_API_KEY) throw new Error("TTS not configured");
+  const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+  const response = await ai.models.generateContent({
+    model: GEMINI_TTS_MODEL,
+    contents: [{ parts: [{ text }] }],
+    config: {
+      responseModalities: [Modality.AUDIO],
+      speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice || "Kore" } } },
+    },
+  });
+  const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+  if (!base64Audio) return null;
+  const wav = pcmToWav(Buffer.from(base64Audio, "base64"), 24000);
+  return { audioBase64: wav.toString("base64"), mimeType: "audio/wav" };
+}
+
 async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
@@ -207,21 +296,14 @@ async function startServer() {
     }
   });
 
-  // Image generation — Gemini (the gateway MVP is text-only).
+  // Image generation — routed through NabuGate (Gemini fallback).
   app.post("/api/generate-image", async (req, res) => {
     const { prompt } = req.body;
     if (!prompt) return res.status(400).json({ error: "prompt is required" });
-    if (!GEMINI_API_KEY) return res.status(503).json({ error: "Image generation not configured" });
     try {
-      const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-      const imageResponse = await ai.models.generateContent({
-        model: GEMINI_IMAGE_MODEL,
-        contents: [{ text: prompt }],
-        config: { imageConfig: { aspectRatio: "16:9" } },
-      });
-      const part = imageResponse.candidates?.[0]?.content?.parts?.find((p: any) => p.inlineData);
-      if (part?.inlineData) {
-        res.json({ image: `data:image/png;base64,${part.inlineData.data}` });
+      const image = await runImage(prompt);
+      if (image) {
+        res.json({ image });
       } else {
         res.status(502).json({ error: "No image returned" });
       }
@@ -231,24 +313,15 @@ async function startServer() {
     }
   });
 
-  // Text-to-speech — Gemini. Returns raw base64 PCM; the client wraps it as WAV.
+  // Text-to-speech — routed through NabuGate (Gemini fallback). Returns a
+  // ready-to-play base64 audio file plus its MIME type.
   app.post("/api/tts", async (req, res) => {
     const { text, voice } = req.body;
     if (!text) return res.status(400).json({ error: "text is required" });
-    if (!GEMINI_API_KEY) return res.status(503).json({ error: "TTS not configured" });
     try {
-      const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-      const response = await ai.models.generateContent({
-        model: GEMINI_TTS_MODEL,
-        contents: [{ parts: [{ text }] }],
-        config: {
-          responseModalities: [Modality.AUDIO],
-          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice || "Kore" } } },
-        },
-      });
-      const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-      if (base64Audio) {
-        res.json({ audioBase64: base64Audio });
+      const audio = await runSpeech(text, voice);
+      if (audio) {
+        res.json(audio);
       } else {
         res.status(502).json({ error: "No audio returned" });
       }
