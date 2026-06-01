@@ -71,7 +71,7 @@ Gemini directly.
 | `NABU_IMAGE_MODEL` | Runtime  | NabuGate image alias (default `nabu-image`).                      |
 | `NABU_AUDIO_MODEL` | Runtime  | NabuGate speech alias (default `nabu-voice`).                     |
 | `PORT`             | Runtime  | Port the server listens on (default `3000`).                      |
-| `DATABASE_PATH`    | Runtime  | SQLite file path (default `/data/mokri_assistant.db`).            |
+| `DATABASE_PATH`    | Runtime  | SQLite file path (server default `mokri_assistant.db`; the Docker image sets `/data/mokri_assistant.db`). |
 | `APP_URL`          | Runtime  | Public URL of the deployment (optional).                          |
 
 ### Build & run locally with Docker

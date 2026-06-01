@@ -6,12 +6,15 @@ import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import { GoogleGenAI, Modality } from "@google/genai";
 
+// Load .env.local first (documented for local dev), then .env. dotenv does not
+// override already-set vars, so .env.local takes precedence.
+dotenv.config({ path: ".env.local" });
 dotenv.config();
 
 // --- AI configuration ---
-// Text completions are routed through the NabuGate gateway when configured.
-// Image generation and TTS still call Gemini directly (the gateway MVP is
-// text-only). Keeping these server-side means no API key ships in the client.
+// All AI calls run server-side so no API key ships in the client. Text, image
+// and TTS are routed through the NabuGate gateway when NABU_GATEWAY_URL is set;
+// otherwise they call Gemini directly (the Gemini fallback below).
 const NABU_GATEWAY_URL = process.env.NABU_GATEWAY_URL || "";
 const NABU_API_KEY = process.env.NABU_API_KEY || "";
 const NABU_MODEL = process.env.NABU_MODEL || "nabu-smart";
@@ -329,6 +332,13 @@ async function startServer() {
       console.error("tts error:", err?.message || err);
       res.status(502).json({ error: "TTS failed" });
     }
+  });
+
+  // Serve the podcast corpus the client fetches. Registered before the static
+  // handler so it works in production too (the file lives next to server.ts,
+  // not in the built dist/).
+  app.get("/podcasts_db.json", (_req, res) => {
+    res.sendFile(path.join(__dirname, "podcasts_db.json"));
   });
 
   // Vite middleware for development

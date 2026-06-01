@@ -401,7 +401,9 @@ export default function App() {
       const ttsRes = await fetch('/api/tts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, voice: 'Kore' }),
+        // No voice: let the server/gateway pick a provider-safe default
+        // (e.g. "alloy" for OpenAI, "Kore" for Gemini).
+        body: JSON.stringify({ text }),
       });
       if (!ttsRes.ok) throw new Error('TTS request failed');
       const { audioBase64, mimeType } = await ttsRes.json();
