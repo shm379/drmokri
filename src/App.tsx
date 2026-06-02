@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef } from 'react';
-import { GoogleGenAI, Modality } from "@google/genai";
 import ReactMarkdown from 'react-markdown';
 import { 
   Brain, 
@@ -399,42 +398,22 @@ export default function App() {
 
     setIsSpeaking(true);
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash-preview-tts",
-        contents: [{ parts: [{ text: text }] }],
-        config: {
-          responseModalities: [Modality.AUDIO],
-          speechConfig: {
-            voiceConfig: {
-              prebuiltVoiceConfig: { voiceName: 'Kore' },
-            },
-          },
-        },
+      const ttsRes = await fetch('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        // No voice: let the server/gateway pick a provider-safe default
+        // (e.g. "alloy" for OpenAI, "Kore" for Gemini).
+        body: JSON.stringify({ text }),
       });
+      if (!ttsRes.ok) throw new Error('TTS request failed');
+      const { audioBase64, mimeType } = await ttsRes.json();
 
-      const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-      if (base64Audio) {
-        const pcmData = Uint8Array.from(atob(base64Audio), c => c.charCodeAt(0));
-        const wavHeader = new ArrayBuffer(44);
-        const view = new DataView(wavHeader);
-        view.setUint32(0, 0x52494646, false);
-        view.setUint32(4, 36 + pcmData.length, true);
-        view.setUint32(8, 0x57415645, false);
-        view.setUint32(12, 0x666d7420, false);
-        view.setUint32(16, 16, true);
-        view.setUint16(20, 1, true);
-        view.setUint16(22, 1, true);
-        view.setUint32(24, 24000, true);
-        view.setUint32(28, 24000 * 2, true);
-        view.setUint16(32, 2, true);
-        view.setUint16(34, 16, true);
-        view.setUint32(36, 0x64617461, false);
-        view.setUint32(40, pcmData.length, true);
-
-        const blob = new Blob([wavHeader, pcmData], { type: 'audio/wav' });
+      if (audioBase64) {
+        // The server returns a complete, playable audio file (WAV or MP3).
+        const bytes = Uint8Array.from(atob(audioBase64), c => c.charCodeAt(0));
+        const blob = new Blob([bytes], { type: mimeType || 'audio/wav' });
         const audioUrl = URL.createObjectURL(blob);
-        
+
         if (audioRef.current) {
           audioRef.current.src = audioUrl;
           audioRef.current.play().catch(e => console.error("Playback failed", e));
@@ -514,15 +493,7 @@ export default function App() {
       const trait = personality ? PERSONALITY_TRAITS[personality] : PERSONALITY_TRAITS.logical;
       const style = RESPONSE_STYLES.find(s => s.id === responseStyle) || RESPONSE_STYLES[0];
 
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: [
-          {
-            role: "user",
-            parts: [{
-              text: `
+      const promptText = `
 Role: You are the "Dr. Azarakhsh Mokri Smart Assistant". Respond in: ${lang}.
 Style: ${style.label[lang] || style.label.fa}.
 User Personality: ${trait.label[lang] || trait.label.fa}.
@@ -545,31 +516,36 @@ Instructions:
 ${contextText}
 
 User's Problem: ${problem}
-`
-            }]
-          }
-        ],
-        config: {
-          temperature: 0.8,
-        }
-      });
+`;
 
-      const textResult = response.text || "No response received.";
+      const analyzeRes = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: [{ role: 'user', content: promptText }],
+          temperature: 0.8,
+        }),
+      });
+      if (!analyzeRes.ok) throw new Error('Analyze request failed');
+      const analyzeData = await analyzeRes.json();
+
+      const textResult = analyzeData.content || "No response received.";
       setResult(textResult);
 
       const imgs: string[] = [];
       if (isArticleMode) {
         try {
           for (let i = 0; i < 3; i++) {
-            const imageResponse = await ai.models.generateContent({
-              model: 'gemini-2.5-flash-image',
-              contents: [{
-                text: `A professional, minimal, and purely conceptual psychological illustration for: ${problem}. No text. Symbolic representation. Style: soft colors, clean, high quality.`,
-              }],
-              config: { imageConfig: { aspectRatio: "16:9" } }
+            const imageRes = await fetch('/api/generate-image', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                prompt: `A professional, minimal, and purely conceptual psychological illustration for: ${problem}. No text. Symbolic representation. Style: soft colors, clean, high quality.`,
+              }),
             });
-            const part = imageResponse.candidates[0].content.parts.find(p => p.inlineData);
-            if (part?.inlineData) imgs.push(`data:image/png;base64,${part.inlineData.data}`);
+            if (!imageRes.ok) continue;
+            const imageData = await imageRes.json();
+            if (imageData.image) imgs.push(imageData.image);
           }
           setGeneratedImages(imgs);
         } catch (imgErr) {

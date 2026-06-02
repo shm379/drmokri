@@ -1,0 +1,39 @@
+# Coolify deployment for the Dr. Mokri smart assistant.
+#
+# In Coolify create a new resource of type "Docker Compose" pointing at this
+# repository. Coolify provides the reverse proxy / TLS, so only the container
+# port needs to be exposed.
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DATABASE_PATH=/data/mokri_assistant.db
+      # Optional: public URL of the deployment (used for self-referential links)
+      - APP_URL=${APP_URL}
+      # Text completions go through the NabuGate gateway when set.
+      - NABU_GATEWAY_URL=${NABU_GATEWAY_URL}
+      - NABU_API_KEY=${NABU_API_KEY}
+      - NABU_MODEL=${NABU_MODEL:-nabu-smart}
+      - NABU_IMAGE_MODEL=${NABU_IMAGE_MODEL:-nabu-image}
+      - NABU_AUDIO_MODEL=${NABU_AUDIO_MODEL:-nabu-voice}
+      # Fallback for image/TTS/text when NabuGate is not configured.
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+    ports:
+      - "3000"
+    volumes:
+      # Persist the SQLite database across redeploys
+      - mokri-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/api/public-feed',r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  mokri-data:
