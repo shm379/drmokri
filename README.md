@@ -51,14 +51,23 @@ deployed to a self-hosted [Coolify](https://coolify.io) instance.
 ### AI backend
 
 All AI calls run **server-side** — no API key is shipped to the browser. Text
-analysis, image generation, and text-to-speech are all sent to the
-[NabuGate gateway](nabu-gateway/) when configured; otherwise the server calls
-Gemini directly.
+analysis (streamed live), image generation, text-to-speech, and semantic search
+over the podcast corpus are all sent to the [NabuGate gateway](nabu-gateway/)
+when configured; otherwise the server calls Gemini directly.
 
 - Set `NABU_GATEWAY_URL` (+ `NABU_API_KEY`, `NABU_MODEL`, `NABU_IMAGE_MODEL`,
-  `NABU_AUDIO_MODEL`) to route everything through NabuGate.
-- Set `GEMINI_API_KEY` as the fallback for text/image/TTS when NabuGate is not
-  configured.
+  `NABU_AUDIO_MODEL`, `NABU_EMBED_MODEL`) to route everything through NabuGate.
+- Set `GEMINI_API_KEY` as the fallback for text/image/TTS/embeddings when
+  NabuGate is not configured.
+
+**Streaming:** `/api/analyze-stream` returns the answer as Server-Sent Events so
+the UI types it out live.
+
+**Semantic search:** `/api/relevant-context` ranks podcasts by embedding
+similarity (alias `nabu-embed`). Corpus vectors are built once and cached in
+SQLite (rebuilt automatically if the model or corpus changes); until they are
+ready — or if no embeddings backend is configured — it falls back to keyword
+matching.
 
 ### Environment variables
 
@@ -70,6 +79,7 @@ Gemini directly.
 | `NABU_MODEL`       | Runtime  | NabuGate text alias (default `nabu-smart`).                       |
 | `NABU_IMAGE_MODEL` | Runtime  | NabuGate image alias (default `nabu-image`).                      |
 | `NABU_AUDIO_MODEL` | Runtime  | NabuGate speech alias (default `nabu-voice`).                     |
+| `NABU_EMBED_MODEL` | Runtime  | NabuGate embedding alias for semantic search (default `nabu-embed`). |
 | `PORT`             | Runtime  | Port the server listens on (default `3000`).                      |
 | `DATABASE_PATH`    | Runtime  | SQLite file path (server default `mokri_assistant.db`; the Docker image sets `/data/mokri_assistant.db`). |
 | `APP_URL`          | Runtime  | Public URL of the deployment (optional).                          |
