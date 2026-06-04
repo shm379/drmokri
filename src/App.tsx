@@ -484,9 +484,22 @@ export default function App() {
     }, 100);
 
     try {
-      const relevantPodcasts = findRelevantContext(problem);
+      // Ask the server for relevant podcasts (semantic search; keyword fallback).
+      let relevantPodcasts: Podcast[] = [];
+      try {
+        const ctxRes = await fetch('/api/relevant-context', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query: problem }),
+        });
+        if (ctxRes.ok) {
+          const ctxData = await ctxRes.json();
+          relevantPodcasts = ctxData.results || [];
+        }
+      } catch { /* fall back to local keyword search below */ }
+      if (relevantPodcasts.length === 0) relevantPodcasts = findRelevantContext(problem);
       setRelevantSources(relevantPodcasts);
-      const contextText = relevantPodcasts.length > 0 
+      const contextText = relevantPodcasts.length > 0
         ? relevantPodcasts.map(p => `عنوان: ${p.title}\nمتن: ${p.text}`).join('\n\n---\n\n')
         : "هیچ متن مرجع مستقیمی یافت نشد.";
 
@@ -518,7 +531,8 @@ ${contextText}
 User's Problem: ${problem}
 `;
 
-      const analyzeRes = await fetch('/api/analyze', {
+      // Stream the answer so it appears live as it is generated.
+      const analyzeRes = await fetch('/api/analyze-stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -526,10 +540,33 @@ User's Problem: ${problem}
           temperature: 0.8,
         }),
       });
-      if (!analyzeRes.ok) throw new Error('Analyze request failed');
-      const analyzeData = await analyzeRes.json();
+      if (!analyzeRes.ok || !analyzeRes.body) throw new Error('Analyze request failed');
 
-      const textResult = analyzeData.content || "No response received.";
+      const reader = analyzeRes.body.getReader();
+      const decoder = new TextDecoder();
+      let textResult = '';
+      let buffer = '';
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          const l = line.trim();
+          if (!l.startsWith('data:')) continue;
+          const payload = l.slice(5).trim();
+          if (payload === '[DONE]') continue;
+          try {
+            const obj = JSON.parse(payload);
+            if (obj.delta) {
+              textResult += obj.delta;
+              setResult(textResult);
+            }
+          } catch { /* ignore non-JSON keep-alive lines */ }
+        }
+      }
+      if (!textResult) textResult = "No response received.";
       setResult(textResult);
 
       const imgs: string[] = [];

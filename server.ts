@@ -2,6 +2,8 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import Database from "better-sqlite3";
 import path from "path";
+import fs from "fs";
+import crypto from "crypto";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import { GoogleGenAI, Modality } from "@google/genai";
@@ -20,6 +22,8 @@ const NABU_API_KEY = process.env.NABU_API_KEY || "";
 const NABU_MODEL = process.env.NABU_MODEL || "nabu-smart";
 const NABU_IMAGE_MODEL = process.env.NABU_IMAGE_MODEL || "nabu-image";
 const NABU_AUDIO_MODEL = process.env.NABU_AUDIO_MODEL || "nabu-voice";
+const NABU_EMBED_MODEL = process.env.NABU_EMBED_MODEL || "nabu-embed";
+const GEMINI_EMBED_MODEL = process.env.GEMINI_EMBED_MODEL || "text-embedding-004";
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
 const GEMINI_TEXT_MODEL = process.env.GEMINI_TEXT_MODEL || "gemini-3-flash-preview";
 const GEMINI_IMAGE_MODEL = process.env.GEMINI_IMAGE_MODEL || "gemini-2.5-flash-image";
@@ -75,6 +79,19 @@ db.exec(`
     is_public INTEGER DEFAULT 1,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(user_id) REFERENCES users(id)
+  );
+
+  -- Cached embeddings for the podcast corpus (semantic search grounding).
+  CREATE TABLE IF NOT EXISTS podcast_vectors (
+    idx INTEGER PRIMARY KEY,   -- index into the podcasts array
+    vec BLOB NOT NULL          -- Float32 little-endian embedding
+  );
+
+  -- Tracks which embedding model/corpus the cached vectors were built for, so
+  -- stale caches are rebuilt automatically.
+  CREATE TABLE IF NOT EXISTS embed_meta (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    signature TEXT NOT NULL
   );
 `);
 
@@ -207,6 +224,160 @@ async function runSpeech(text: string, voice?: string): Promise<{ audioBase64: s
   return { audioBase64: wav.toString("base64"), mimeType: "audio/wav" };
 }
 
+// --- Semantic search over the podcast corpus ---
+
+interface Podcast {
+  title: string;
+  text: string;
+  link: string;
+  mp3_url: string | null;
+}
+
+let PODCASTS: Podcast[] = [];
+try {
+  PODCASTS = JSON.parse(fs.readFileSync(path.join(__dirname, "podcasts_db.json"), "utf8"));
+} catch {
+  PODCASTS = [];
+}
+
+const embeddingsAvailable = () => Boolean(NABU_GATEWAY_URL || GEMINI_API_KEY);
+
+// runEmbeddings embeds texts via NabuGate (or Gemini's batchEmbedContents).
+async function runEmbeddings(texts: string[]): Promise<number[][]> {
+  if (NABU_GATEWAY_URL) {
+    const resp = await fetch(`${NABU_GATEWAY_URL.replace(/\/$/, "")}/v1/embeddings`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(NABU_API_KEY ? { Authorization: `Bearer ${NABU_API_KEY}` } : {}),
+      },
+      body: JSON.stringify({ model: NABU_EMBED_MODEL, input: texts }),
+    });
+    if (!resp.ok) throw new Error(`NabuGate embeddings error ${resp.status}: ${await resp.text()}`);
+    const data: any = await resp.json();
+    return (data.data || []).map((d: any) => d.embedding as number[]);
+  }
+
+  if (!GEMINI_API_KEY) throw new Error("Embeddings not configured");
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_EMBED_MODEL}:batchEmbedContents?key=${encodeURIComponent(GEMINI_API_KEY)}`;
+  const resp = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      requests: texts.map(t => ({ model: `models/${GEMINI_EMBED_MODEL}`, content: { parts: [{ text: t }] } })),
+    }),
+  });
+  if (!resp.ok) throw new Error(`Gemini embeddings error ${resp.status}: ${await resp.text()}`);
+  const data: any = await resp.json();
+  return (data.embeddings || []).map((e: any) => e.values as number[]);
+}
+
+function corpusText(p: Podcast): string {
+  // Title + a bounded slice of the transcript to stay within embedding limits.
+  return `${p.title}\n${(p.text || "").slice(0, 6000)}`;
+}
+
+function corpusSignature(): string {
+  const model = NABU_GATEWAY_URL ? `nabu:${NABU_EMBED_MODEL}` : `gemini:${GEMINI_EMBED_MODEL}`;
+  return crypto.createHash("sha1").update(`${model}|${PODCASTS.length}`).digest("hex");
+}
+
+function floatsToBuf(v: number[]): Buffer {
+  const f = Float32Array.from(v);
+  return Buffer.from(f.buffer, f.byteOffset, f.byteLength);
+}
+
+function bufToFloats(b: Buffer): Float32Array {
+  // Read element-wise to avoid alignment assumptions on the underlying buffer.
+  const out = new Float32Array(Math.floor(b.length / 4));
+  for (let i = 0; i < out.length; i++) out[i] = b.readFloatLE(i * 4);
+  return out;
+}
+
+let corpusReady = false;
+let corpusBuilding = false;
+
+function vectorCount(): number {
+  return (db.prepare("SELECT COUNT(*) AS c FROM podcast_vectors").get() as any).c;
+}
+
+function storedSignature(): string | null {
+  const row = db.prepare("SELECT signature FROM embed_meta WHERE id = 1").get() as any;
+  return row?.signature ?? null;
+}
+
+// ensureCorpusVectors builds (once) the cached corpus embeddings if missing or
+// stale. It runs in the background; callers fall back to keyword search until
+// it completes.
+async function ensureCorpusVectors(): Promise<void> {
+  if (corpusReady || corpusBuilding || PODCASTS.length === 0 || !embeddingsAvailable()) return;
+  const sig = corpusSignature();
+  if (storedSignature() === sig && vectorCount() === PODCASTS.length) {
+    corpusReady = true;
+    return;
+  }
+  corpusBuilding = true;
+  try {
+    db.exec("DELETE FROM podcast_vectors;");
+    const insert = db.prepare("INSERT OR REPLACE INTO podcast_vectors (idx, vec) VALUES (?, ?)");
+    const tx = db.transaction((rows: { idx: number; vec: Buffer }[]) => {
+      for (const r of rows) insert.run(r.idx, r.vec);
+    });
+    const BATCH = 32;
+    for (let i = 0; i < PODCASTS.length; i += BATCH) {
+      const slice = PODCASTS.slice(i, i + BATCH);
+      const vecs = await runEmbeddings(slice.map(corpusText));
+      tx(vecs.map((v, j) => ({ idx: i + j, vec: floatsToBuf(v) })));
+    }
+    db.prepare("INSERT OR REPLACE INTO embed_meta (id, signature) VALUES (1, ?)").run(sig);
+    corpusReady = true;
+    console.log(`Corpus embeddings ready (${PODCASTS.length} podcasts).`);
+  } catch (err: any) {
+    console.error("Corpus embedding build failed:", err?.message || err);
+  } finally {
+    corpusBuilding = false;
+  }
+}
+
+function cosine(a: Float32Array, b: number[]): number {
+  let dot = 0, na = 0, nb = 0;
+  const n = Math.min(a.length, b.length);
+  for (let i = 0; i < n; i++) {
+    dot += a[i] * b[i];
+    na += a[i] * a[i];
+    nb += b[i] * b[i];
+  }
+  return na && nb ? dot / (Math.sqrt(na) * Math.sqrt(nb)) : 0;
+}
+
+async function semanticSearch(query: string, k: number): Promise<Podcast[]> {
+  const [qvec] = await runEmbeddings([query]);
+  if (!qvec) return [];
+  const rows = db.prepare("SELECT idx, vec FROM podcast_vectors").all() as { idx: number; vec: Buffer }[];
+  return rows
+    .map(r => ({ idx: r.idx, score: cosine(bufToFloats(r.vec), qvec) }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, k)
+    .map(s => PODCASTS[s.idx])
+    .filter(Boolean);
+}
+
+function keywordSearch(query: string, k: number): Podcast[] {
+  if (!query || PODCASTS.length === 0) return [];
+  const keywords = query.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+  return PODCASTS
+    .map(p => {
+      const content = (p.title + " " + p.text).toLowerCase();
+      let score = 0;
+      keywords.forEach(kw => { if (content.includes(kw)) score++; });
+      return { p, score };
+    })
+    .filter(s => s.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, k)
+    .map(s => s.p);
+}
+
 async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
@@ -299,6 +470,98 @@ async function startServer() {
     }
   });
 
+  // Streaming text analysis — Server-Sent Events of { delta } objects.
+  app.post("/api/analyze-stream", async (req, res) => {
+    const { messages, temperature } = req.body;
+    if (!Array.isArray(messages) || messages.length === 0) {
+      return res.status(400).json({ error: "messages is required" });
+    }
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    const send = (obj: any) => res.write(`data: ${JSON.stringify(obj)}\n\n`);
+
+    try {
+      if (NABU_GATEWAY_URL) {
+        const upstream = await fetch(`${NABU_GATEWAY_URL.replace(/\/$/, "")}/v1/chat/completions`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(NABU_API_KEY ? { Authorization: `Bearer ${NABU_API_KEY}` } : {}),
+          },
+          body: JSON.stringify({ model: NABU_MODEL, messages, temperature, stream: true }),
+        });
+        if (!upstream.ok || !upstream.body) throw new Error(`gateway stream error ${upstream.status}`);
+        const reader = upstream.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = "";
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const lines = buf.split("\n");
+          buf = lines.pop() || "";
+          for (const line of lines) {
+            const l = line.trim();
+            if (!l.startsWith("data:")) continue;
+            const d = l.slice(5).trim();
+            if (d === "[DONE]") continue;
+            try {
+              const delta = JSON.parse(d).choices?.[0]?.delta?.content;
+              if (delta) send({ delta });
+            } catch { /* ignore keep-alive lines */ }
+          }
+        }
+      } else {
+        if (!GEMINI_API_KEY) throw new Error("No AI backend configured");
+        const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+        const systemText = messages.filter((m: any) => m.role === "system").map((m: any) => m.content).join("\n\n");
+        const contents = messages
+          .filter((m: any) => m.role !== "system")
+          .map((m: any) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.content }] }));
+        const stream = await ai.models.generateContentStream({
+          model: GEMINI_TEXT_MODEL,
+          contents,
+          config: { temperature: temperature ?? 0.8, ...(systemText ? { systemInstruction: systemText } : {}) },
+        });
+        for await (const chunk of stream) {
+          const t = chunk.text;
+          if (t) send({ delta: t });
+        }
+      }
+      send({ done: true });
+      res.write("data: [DONE]\n\n");
+      res.end();
+    } catch (err: any) {
+      console.error("analyze-stream error:", err?.message || err);
+      if (!res.headersSent) {
+        res.status(502).json({ error: "AI stream failed" });
+      } else {
+        send({ error: "stream failed" });
+        res.write("data: [DONE]\n\n");
+        res.end();
+      }
+    }
+  });
+
+  // Relevant podcast context — semantic search (embeddings) with a keyword
+  // fallback while the corpus embeddings are still being built.
+  app.post("/api/relevant-context", async (req, res) => {
+    const { query } = req.body;
+    if (!query) return res.status(400).json({ error: "query is required" });
+    try {
+      if (embeddingsAvailable() && corpusReady) {
+        return res.json({ method: "semantic", results: await semanticSearch(query, 5) });
+      }
+      if (embeddingsAvailable()) void ensureCorpusVectors(); // build for next time
+      res.json({ method: "keyword", results: keywordSearch(query, 5) });
+    } catch (err: any) {
+      console.error("relevant-context error:", err?.message || err);
+      res.json({ method: "keyword", results: keywordSearch(query, 5) });
+    }
+  });
+
   // Image generation — routed through NabuGate (Gemini fallback).
   app.post("/api/generate-image", async (req, res) => {
     const { prompt } = req.body;
@@ -357,6 +620,8 @@ async function startServer() {
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
+    // Warm the semantic-search corpus in the background (no-op if no embeddings).
+    void ensureCorpusVectors();
   });
 }
 
