@@ -1,7 +1,0 @@
-.git
-.env
-.env.*
-!.env.example
-config.yaml
-*.log
-README.md
