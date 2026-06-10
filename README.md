@@ -52,7 +52,8 @@ deployed to a self-hosted [Coolify](https://coolify.io) instance.
 
 All AI calls run **server-side** — no API key is shipped to the browser. Text
 analysis (streamed live), image generation, text-to-speech, and semantic search
-over the podcast corpus are all sent to the [NabuGate gateway](nabu-gateway/)
+over the podcast corpus are all sent to the
+[NabuGate gateway](https://github.com/nabuxai/NabuGate) (a separate project)
 when configured; otherwise the server calls Gemini directly.
 
 - Set `NABU_GATEWAY_URL` (+ `NABU_API_KEY`, `NABU_MODEL`, `NABU_IMAGE_MODEL`,
