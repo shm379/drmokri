@@ -22,8 +22,13 @@ import {
   LogOut,
   Phone,
   Image as ImageIcon,
+  Search,
+  Share2,
+  Sparkles,
+  X,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { podcasts as PODCASTS_RAW } from './data/podcasts';
 
 interface Podcast {
   title: string;
@@ -46,6 +51,7 @@ interface SavedQuery {
   language: string;
   images: string[];
   user_phone?: string;
+  user_id_text?: string;
   created_at: string;
 }
 
@@ -251,6 +257,13 @@ const PERSONALITY_TRAITS: Record<string, { label: any, icon: any, description: a
     description: { fa: 'تمرکز بر استانداردها و پذیرش نقص', en: 'Focus on standards and accepting flaws' } 
   },
 };
+
+// Podcast corpus with a numeric id derived from the title (e.g. "شماره 385" -> 385).
+// Used by the Discover feed and to link podcast references inside generated answers.
+const PODCASTS_DB = PODCASTS_RAW.map((p) => {
+  const match = p.title.match(/\d+/);
+  return { ...p, id: match ? parseInt(match[0], 10) : 0 };
+});
 
 const RESPONSE_STYLES = [
   { id: 'friendly', label: { fa: 'خودمانی و دوستانه', en: 'Friendly & Casual' }, description: { fa: 'لحنی گرم و صمیمی مثل یک گفتگوی دوستانه', en: 'Warm and intimate like a friendly chat' } },
