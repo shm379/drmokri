@@ -612,9 +612,22 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    app.use(express.static(path.join(__dirname, "dist")));
-    app.get("*", (req, res) => {
-      res.sendFile(path.join(__dirname, "dist", "index.html"));
+    const distDir = path.join(__dirname, "dist");
+    app.use(express.static(distDir, {
+      setHeaders: (res, filePath) => {
+        if (filePath.endsWith("index.html")) {
+          // index.html must always be revalidated so a redeploy is picked up
+          // immediately (it points at the freshly content-hashed bundle).
+          res.setHeader("Cache-Control", "no-cache, must-revalidate");
+        } else if (filePath.includes(`${path.sep}assets${path.sep}`)) {
+          // Vite emits content-hashed filenames under /assets — safe forever.
+          res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+        }
+      },
+    }));
+    app.get("*", (_req, res) => {
+      res.setHeader("Cache-Control", "no-cache, must-revalidate");
+      res.sendFile(path.join(distDir, "index.html"));
     });
   }
 
