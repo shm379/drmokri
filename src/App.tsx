@@ -10,6 +10,7 @@ import {
   Zap, 
   ShieldAlert,
   ChevronRight,
+  ChevronDown,
   Mic,
   MicOff,
   Volume2,
