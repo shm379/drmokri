@@ -560,6 +560,7 @@ User's Problem: ${problem}
       const decoder = new TextDecoder();
       let textResult = '';
       let buffer = '';
+      let streamError = false;
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -576,10 +577,17 @@ User's Problem: ${problem}
             if (obj.delta) {
               textResult += obj.delta;
               setResult(textResult);
+            } else if (obj.error) {
+              // Server emits an { error } event when the AI stream breaks after
+              // headers were already sent.
+              streamError = true;
             }
           } catch { /* ignore non-JSON keep-alive lines */ }
         }
       }
+      // Only treat the stream as failed if nothing usable arrived; otherwise
+      // keep the partial answer the user already saw.
+      if (!textResult && streamError) throw new Error('Analyze stream failed');
       if (!textResult) textResult = "No response received.";
       setResult(textResult);
 
@@ -605,21 +613,28 @@ User's Problem: ${problem}
       }
 
       if (user) {
-        await fetch('/api/save-query', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            userId: user.id,
-            userContext,
-            problem,
-            personality,
-            style: responseStyle,
-            language: lang,
-            answer: textResult,
-            images: imgs,
-            isPublic: true
-          }),
-        });
+        // Saving to history is best-effort: the answer is already generated and
+        // shown, so a persistence failure must NOT surface as a fatal "error
+        // occurred" message at the end of an otherwise successful analysis.
+        try {
+          await fetch('/api/save-query', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              userId: user.id,
+              userContext,
+              problem,
+              personality,
+              style: responseStyle,
+              language: lang,
+              answer: textResult,
+              images: imgs,
+              isPublic: true
+            }),
+          });
+        } catch (saveErr) {
+          console.error('Failed to save query to history:', saveErr);
+        }
       }
 
     } catch (err) {
