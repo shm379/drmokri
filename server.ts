@@ -28,9 +28,51 @@ const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
 const GEMINI_TEXT_MODEL = process.env.GEMINI_TEXT_MODEL || "gemini-3-flash-preview";
 const GEMINI_IMAGE_MODEL = process.env.GEMINI_IMAGE_MODEL || "gemini-2.5-flash-image";
 const GEMINI_TTS_MODEL = process.env.GEMINI_TTS_MODEL || "gemini-2.5-flash-preview-tts";
+// How long to wait on a NabuGate request before giving up (ms). Keeps a hung
+// gateway from blocking a request forever. Image generation gets 2x this.
+const NABU_TIMEOUT_MS = Number(process.env.NABU_TIMEOUT_MS) || 60000;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// aiBackend reports which backend is wired up, for startup logs and /api/health.
+function aiBackend(): "nabugate" | "gemini" | "none" {
+  if (NABU_GATEWAY_URL) return "nabugate";
+  if (GEMINI_API_KEY) return "gemini";
+  return "none";
+}
+
+// withTimeout runs fn with an AbortSignal that fires after timeoutMs, so a slow
+// or unreachable gateway fails fast instead of hanging. For streaming callers,
+// resolve fn as soon as the response headers arrive so the body can stream past
+// the timeout window.
+async function withTimeout<T>(timeoutMs: number, fn: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fn(controller.signal);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// verifyNabuGate pings the gateway once at startup so a wrong URL/key shows up in
+// the logs immediately instead of only failing on the first user request.
+async function verifyNabuGate(): Promise<void> {
+  if (!NABU_GATEWAY_URL) return;
+  try {
+    const resp = await withTimeout(5000, (signal) =>
+      fetch(`${NABU_GATEWAY_URL.replace(/\/$/, "")}/healthz`, {
+        headers: { ...(NABU_API_KEY ? { Authorization: `Bearer ${NABU_API_KEY}` } : {}) },
+        signal,
+      }),
+    );
+    if (resp.ok) console.log("NabuGate reachable ✓");
+    else console.warn(`NabuGate health check returned HTTP ${resp.status}. Check NABU_API_KEY / gateway config.`);
+  } catch (err: any) {
+    console.warn(`NabuGate not reachable: ${err?.name === "AbortError" ? "timeout" : err?.message || err}`);
+  }
+}
 
 const DB_PATH = process.env.DATABASE_PATH || "mokri_assistant.db";
 const db = new Database(DB_PATH);
@@ -103,18 +145,21 @@ async function runChat(
   temperature?: number,
 ): Promise<{ content: string; provider: string }> {
   if (NABU_GATEWAY_URL) {
-    const resp = await fetch(`${NABU_GATEWAY_URL.replace(/\/$/, "")}/v1/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(NABU_API_KEY ? { Authorization: `Bearer ${NABU_API_KEY}` } : {}),
-      },
-      body: JSON.stringify({ model: NABU_MODEL, messages, temperature }),
+    const data: any = await withTimeout(NABU_TIMEOUT_MS, async (signal) => {
+      const resp = await fetch(`${NABU_GATEWAY_URL.replace(/\/$/, "")}/v1/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(NABU_API_KEY ? { Authorization: `Bearer ${NABU_API_KEY}` } : {}),
+        },
+        body: JSON.stringify({ model: NABU_MODEL, messages, temperature }),
+        signal,
+      });
+      if (!resp.ok) {
+        throw new Error(`NabuGate error ${resp.status}: ${await resp.text()}`);
+      }
+      return resp.json();
     });
-    if (!resp.ok) {
-      throw new Error(`NabuGate error ${resp.status}: ${await resp.text()}`);
-    }
-    const data: any = await resp.json();
     return { content: data.choices?.[0]?.message?.content || "", provider: data.provider || "nabugate" };
   }
 
@@ -164,16 +209,19 @@ function pcmToWav(pcm: Buffer, sampleRate: number): Buffer {
 // ready-to-use data URL.
 async function runImage(prompt: string): Promise<string | null> {
   if (NABU_GATEWAY_URL) {
-    const resp = await fetch(`${NABU_GATEWAY_URL.replace(/\/$/, "")}/v1/images/generations`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(NABU_API_KEY ? { Authorization: `Bearer ${NABU_API_KEY}` } : {}),
-      },
-      body: JSON.stringify({ model: NABU_IMAGE_MODEL, prompt, n: 1, aspect_ratio: "16:9" }),
+    const data: any = await withTimeout(NABU_TIMEOUT_MS * 2, async (signal) => {
+      const resp = await fetch(`${NABU_GATEWAY_URL.replace(/\/$/, "")}/v1/images/generations`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(NABU_API_KEY ? { Authorization: `Bearer ${NABU_API_KEY}` } : {}),
+        },
+        body: JSON.stringify({ model: NABU_IMAGE_MODEL, prompt, n: 1, aspect_ratio: "16:9" }),
+        signal,
+      });
+      if (!resp.ok) throw new Error(`NabuGate image error ${resp.status}: ${await resp.text()}`);
+      return resp.json();
     });
-    if (!resp.ok) throw new Error(`NabuGate image error ${resp.status}: ${await resp.text()}`);
-    const data: any = await resp.json();
     const b64 = data.data?.[0]?.b64_json;
     return b64 ? `data:image/png;base64,${b64}` : null;
   }
@@ -194,18 +242,21 @@ async function runImage(prompt: string): Promise<string | null> {
 // base64 file plus its MIME type.
 async function runSpeech(text: string, voice?: string): Promise<{ audioBase64: string; mimeType: string } | null> {
   if (NABU_GATEWAY_URL) {
-    const resp = await fetch(`${NABU_GATEWAY_URL.replace(/\/$/, "")}/v1/audio/speech`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(NABU_API_KEY ? { Authorization: `Bearer ${NABU_API_KEY}` } : {}),
-      },
-      body: JSON.stringify({ model: NABU_AUDIO_MODEL, input: text, voice }),
+    return await withTimeout(NABU_TIMEOUT_MS, async (signal) => {
+      const resp = await fetch(`${NABU_GATEWAY_URL.replace(/\/$/, "")}/v1/audio/speech`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(NABU_API_KEY ? { Authorization: `Bearer ${NABU_API_KEY}` } : {}),
+        },
+        body: JSON.stringify({ model: NABU_AUDIO_MODEL, input: text, voice }),
+        signal,
+      });
+      if (!resp.ok) throw new Error(`NabuGate tts error ${resp.status}: ${await resp.text()}`);
+      const mimeType = resp.headers.get("content-type") || "audio/mpeg";
+      const buf = Buffer.from(await resp.arrayBuffer());
+      return { audioBase64: buf.toString("base64"), mimeType };
     });
-    if (!resp.ok) throw new Error(`NabuGate tts error ${resp.status}: ${await resp.text()}`);
-    const mimeType = resp.headers.get("content-type") || "audio/mpeg";
-    const buf = Buffer.from(await resp.arrayBuffer());
-    return { audioBase64: buf.toString("base64"), mimeType };
   }
 
   if (!GEMINI_API_KEY) throw new Error("TTS not configured");
@@ -245,30 +296,36 @@ const embeddingsAvailable = () => Boolean(NABU_GATEWAY_URL || GEMINI_API_KEY);
 // runEmbeddings embeds texts via NabuGate (or Gemini's batchEmbedContents).
 async function runEmbeddings(texts: string[]): Promise<number[][]> {
   if (NABU_GATEWAY_URL) {
-    const resp = await fetch(`${NABU_GATEWAY_URL.replace(/\/$/, "")}/v1/embeddings`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(NABU_API_KEY ? { Authorization: `Bearer ${NABU_API_KEY}` } : {}),
-      },
-      body: JSON.stringify({ model: NABU_EMBED_MODEL, input: texts }),
+    const data: any = await withTimeout(NABU_TIMEOUT_MS, async (signal) => {
+      const resp = await fetch(`${NABU_GATEWAY_URL.replace(/\/$/, "")}/v1/embeddings`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(NABU_API_KEY ? { Authorization: `Bearer ${NABU_API_KEY}` } : {}),
+        },
+        body: JSON.stringify({ model: NABU_EMBED_MODEL, input: texts }),
+        signal,
+      });
+      if (!resp.ok) throw new Error(`NabuGate embeddings error ${resp.status}: ${await resp.text()}`);
+      return resp.json();
     });
-    if (!resp.ok) throw new Error(`NabuGate embeddings error ${resp.status}: ${await resp.text()}`);
-    const data: any = await resp.json();
     return (data.data || []).map((d: any) => d.embedding as number[]);
   }
 
   if (!GEMINI_API_KEY) throw new Error("Embeddings not configured");
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_EMBED_MODEL}:batchEmbedContents?key=${encodeURIComponent(GEMINI_API_KEY)}`;
-  const resp = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      requests: texts.map(t => ({ model: `models/${GEMINI_EMBED_MODEL}`, content: { parts: [{ text: t }] } })),
-    }),
+  const data: any = await withTimeout(NABU_TIMEOUT_MS, async (signal) => {
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        requests: texts.map(t => ({ model: `models/${GEMINI_EMBED_MODEL}`, content: { parts: [{ text: t }] } })),
+      }),
+      signal,
+    });
+    if (!resp.ok) throw new Error(`Gemini embeddings error ${resp.status}: ${await resp.text()}`);
+    return resp.json();
   });
-  if (!resp.ok) throw new Error(`Gemini embeddings error ${resp.status}: ${await resp.text()}`);
-  const data: any = await resp.json();
   return (data.embeddings || []).map((e: any) => e.values as number[]);
 }
 
@@ -385,6 +442,38 @@ async function startServer() {
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
+  // Health & AI-backend diagnostics. Reports which backend is wired up and, for
+  // NabuGate, whether the gateway is actually reachable right now — handy for
+  // confirming the connection from a browser or uptime check.
+  app.get("/api/health", async (_req, res) => {
+    const backend = aiBackend();
+    const info: any = {
+      status: "ok",
+      aiBackend: backend,
+      textModel: backend === "nabugate" ? NABU_MODEL : backend === "gemini" ? GEMINI_TEXT_MODEL : null,
+    };
+    if (backend === "nabugate") {
+      info.gateway = {
+        url: NABU_GATEWAY_URL,
+        models: { text: NABU_MODEL, image: NABU_IMAGE_MODEL, audio: NABU_AUDIO_MODEL, embed: NABU_EMBED_MODEL },
+      };
+      try {
+        const ping = await withTimeout(5000, (signal) =>
+          fetch(`${NABU_GATEWAY_URL.replace(/\/$/, "")}/healthz`, {
+            headers: { ...(NABU_API_KEY ? { Authorization: `Bearer ${NABU_API_KEY}` } : {}) },
+            signal,
+          }),
+        );
+        info.gateway.reachable = ping.ok;
+        info.gateway.statusCode = ping.status;
+      } catch (err: any) {
+        info.gateway.reachable = false;
+        info.gateway.error = err?.name === "AbortError" ? "timeout" : err?.message || "unreachable";
+      }
+    }
+    res.json(info);
+  });
+
   // API Routes
   app.post("/api/login", (req, res) => {
     const { identifier } = req.body;
@@ -484,14 +573,19 @@ async function startServer() {
 
     try {
       if (NABU_GATEWAY_URL) {
-        const upstream = await fetch(`${NABU_GATEWAY_URL.replace(/\/$/, "")}/v1/chat/completions`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...(NABU_API_KEY ? { Authorization: `Bearer ${NABU_API_KEY}` } : {}),
-          },
-          body: JSON.stringify({ model: NABU_MODEL, messages, temperature, stream: true }),
-        });
+        // Connect timeout only: once headers arrive the answer may stream for a
+        // while, so we don't cap the total streaming duration.
+        const upstream = await withTimeout(30000, (signal) =>
+          fetch(`${NABU_GATEWAY_URL.replace(/\/$/, "")}/v1/chat/completions`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...(NABU_API_KEY ? { Authorization: `Bearer ${NABU_API_KEY}` } : {}),
+            },
+            body: JSON.stringify({ model: NABU_MODEL, messages, temperature, stream: true }),
+            signal,
+          }),
+        );
         if (!upstream.ok || !upstream.body) throw new Error(`gateway stream error ${upstream.status}`);
         const reader = upstream.body.getReader();
         const decoder = new TextDecoder();
@@ -633,6 +727,18 @@ async function startServer() {
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
+    const backend = aiBackend();
+    if (backend === "nabugate") {
+      console.log(
+        `AI backend: NabuGate → ${NABU_GATEWAY_URL} ` +
+        `(text=${NABU_MODEL}, image=${NABU_IMAGE_MODEL}, audio=${NABU_AUDIO_MODEL}, embed=${NABU_EMBED_MODEL})`,
+      );
+      void verifyNabuGate();
+    } else if (backend === "gemini") {
+      console.log("AI backend: Gemini direct. Set NABU_GATEWAY_URL (+ NABU_API_KEY) to route through NabuGate.");
+    } else {
+      console.warn("AI backend: NONE configured. Set NABU_GATEWAY_URL (+ NABU_API_KEY) or GEMINI_API_KEY.");
+    }
     // Warm the semantic-search corpus in the background (no-op if no embeddings).
     void ensureCorpusVectors();
   });
