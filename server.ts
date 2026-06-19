@@ -37,6 +37,11 @@ let NABU_TIMEOUT_MS = Number(process.env.NABU_TIMEOUT_MS) || 60000;
 // empty the panel is disabled, so the gateway address/key can never be changed
 // by an anonymous visitor.
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "";
+// Per-IP rate limit for the (paid) AI endpoints, to cap cost/abuse on a public
+// deployment. AI_RATE_LIMIT requests per AI_RATE_WINDOW_MS; set AI_RATE_LIMIT=0
+// to disable.
+const AI_RATE_LIMIT = Number(process.env.AI_RATE_LIMIT ?? 30);
+const AI_RATE_WINDOW_MS = Number(process.env.AI_RATE_WINDOW_MS) || 60000;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -486,9 +491,39 @@ function keywordSearch(query: string, k: number): Podcast[] {
     .map(s => s.p);
 }
 
+// --- Per-IP rate limiting for the paid AI endpoints (sliding window) ---
+const rateBuckets = new Map<string, number[]>();
+// Periodically drop stale buckets so the map doesn't grow unbounded.
+setInterval(() => {
+  const cutoff = Date.now() - AI_RATE_WINDOW_MS;
+  for (const [ip, hits] of rateBuckets) {
+    const fresh = hits.filter(ts => ts > cutoff);
+    if (fresh.length) rateBuckets.set(ip, fresh);
+    else rateBuckets.delete(ip);
+  }
+}, AI_RATE_WINDOW_MS).unref();
+
+function aiRateLimit(req: any, res: any, next: any) {
+  if (AI_RATE_LIMIT <= 0) return next();
+  const now = Date.now();
+  const ip = req.ip || req.socket?.remoteAddress || "unknown";
+  const hits = (rateBuckets.get(ip) || []).filter(ts => now - ts < AI_RATE_WINDOW_MS);
+  if (hits.length >= AI_RATE_LIMIT) {
+    res.setHeader("Retry-After", Math.ceil((AI_RATE_WINDOW_MS - (now - hits[0])) / 1000));
+    return res.status(429).json({ error: "Too many AI requests. Please slow down and try again shortly." });
+  }
+  hits.push(now);
+  rateBuckets.set(ip, hits);
+  next();
+}
+
 async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
+
+  // Behind Coolify's reverse proxy, trust X-Forwarded-* so req.ip is the real
+  // client IP (used by the rate limiter).
+  app.set("trust proxy", true);
 
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
@@ -684,7 +719,7 @@ async function startServer() {
   // --- AI endpoints (server-side; keeps API keys out of the client) ---
 
   // Text analysis — routed through NabuGate (or Gemini fallback).
-  app.post("/api/analyze", async (req, res) => {
+  app.post("/api/analyze", aiRateLimit, async (req, res) => {
     const { messages, temperature } = req.body;
     if (!Array.isArray(messages) || messages.length === 0) {
       return res.status(400).json({ error: "messages is required" });
@@ -699,7 +734,7 @@ async function startServer() {
   });
 
   // Streaming text analysis — Server-Sent Events of { delta } objects.
-  app.post("/api/analyze-stream", async (req, res) => {
+  app.post("/api/analyze-stream", aiRateLimit, async (req, res) => {
     const { messages, temperature } = req.body;
     if (!Array.isArray(messages) || messages.length === 0) {
       return res.status(400).json({ error: "messages is required" });
@@ -780,7 +815,7 @@ async function startServer() {
 
   // Relevant podcast context — semantic search (embeddings) with a keyword
   // fallback while the corpus embeddings are still being built.
-  app.post("/api/relevant-context", async (req, res) => {
+  app.post("/api/relevant-context", aiRateLimit, async (req, res) => {
     const { query } = req.body;
     if (!query) return res.status(400).json({ error: "query is required" });
     try {
@@ -796,7 +831,7 @@ async function startServer() {
   });
 
   // Image generation — routed through NabuGate (Gemini fallback).
-  app.post("/api/generate-image", async (req, res) => {
+  app.post("/api/generate-image", aiRateLimit, async (req, res) => {
     const { prompt } = req.body;
     if (!prompt) return res.status(400).json({ error: "prompt is required" });
     try {
@@ -814,7 +849,7 @@ async function startServer() {
 
   // Text-to-speech — routed through NabuGate (Gemini fallback). Returns a
   // ready-to-play base64 audio file plus its MIME type.
-  app.post("/api/tts", async (req, res) => {
+  app.post("/api/tts", aiRateLimit, async (req, res) => {
     const { text, voice } = req.body;
     if (!text) return res.status(400).json({ error: "text is required" });
     try {

@@ -29,6 +29,9 @@ import {
   Settings,
   Wifi,
   WifiOff,
+  Square,
+  Copy,
+  Check,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { podcasts as PODCASTS_RAW } from './data/podcasts';
@@ -97,6 +100,10 @@ const TRANSLATIONS: Record<string, any> = {
     quizzes: 'آزمون‌ها',
     moodPlaceholder: 'امروز چه حسی داری؟ بنویس تا دکتر راهنماییت کنه...',
     saveMood: 'ثبت وضعیت روحی',
+    stop: 'توقف تولید',
+    copy: 'کپی متن',
+    copied: 'کپی شد ✓',
+    delete: 'حذف',
   },
   en: {
     welcome: 'Welcome',
@@ -129,6 +136,10 @@ const TRANSLATIONS: Record<string, any> = {
     quizzes: 'Quizzes',
     moodPlaceholder: 'How are you feeling today? Write it down...',
     saveMood: 'Save Mood',
+    stop: 'Stop',
+    copy: 'Copy',
+    copied: 'Copied ✓',
+    delete: 'Delete',
   },
   tr: {
     welcome: 'Hoş Geldiniz',
@@ -161,6 +172,10 @@ const TRANSLATIONS: Record<string, any> = {
     quizzes: 'Testler',
     moodPlaceholder: 'Bugün nasıl hissediyorsun?',
     saveMood: 'Ruh Halini Kaydet',
+    stop: 'Durdur',
+    copy: 'Kopyala',
+    copied: 'Kopyalandı ✓',
+    delete: 'Sil',
   },
   ar: {
     welcome: 'أهلاً بك',
@@ -193,6 +208,10 @@ const TRANSLATIONS: Record<string, any> = {
     quizzes: 'الاختبارات',
     moodPlaceholder: 'كيف تشعر اليوم؟ اكتب هنا...',
     saveMood: 'حفظ الحالة النفسية',
+    stop: 'إيقاف',
+    copy: 'نسخ',
+    copied: 'تم النسخ ✓',
+    delete: 'حذف',
   }
 };
 
@@ -372,8 +391,10 @@ export default function App() {
 
   const recognitionRef = useRef<any>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     fetch('/podcasts_db.json')
@@ -648,6 +669,11 @@ export default function App() {
     setGeneratedImages([]);
     setRelevantSources([]);
 
+    // Allow the user to cancel an in-flight generation (see stopAnalyze).
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const { signal } = controller;
+
     // Scroll to results area
     setTimeout(() => {
       window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
@@ -661,6 +687,7 @@ export default function App() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ query: problem }),
+          signal,
         });
         if (ctxRes.ok) {
           const ctxData = await ctxRes.json();
@@ -709,6 +736,7 @@ User's Problem: ${problem}
           messages: [{ role: 'user', content: promptText }],
           temperature: 0.8,
         }),
+        signal,
       });
       if (!analyzeRes.ok || !analyzeRes.body) throw new Error('Analyze request failed');
 
@@ -757,6 +785,7 @@ User's Problem: ${problem}
               body: JSON.stringify({
                 prompt: `A professional, minimal, and purely conceptual psychological illustration for: ${problem}. No text. Symbolic representation. Style: soft colors, clean, high quality.`,
               }),
+              signal,
             });
             if (!imageRes.ok) continue;
             const imageData = await imageRes.json();
@@ -764,6 +793,7 @@ User's Problem: ${problem}
           }
           setGeneratedImages(imgs);
         } catch (imgErr) {
+          if ((imgErr as any)?.name === 'AbortError') throw imgErr; // user stopped
           console.error("Image generation failed", imgErr);
         }
       }
@@ -794,10 +824,30 @@ User's Problem: ${problem}
       }
 
     } catch (err) {
-      console.error(err);
-      setError(t.error);
+      // A user-initiated cancel is not an error — keep whatever streamed so far.
+      if ((err as any)?.name === 'AbortError') {
+        // no-op
+      } else {
+        console.error(err);
+        setError(t.error);
+      }
     } finally {
+      abortRef.current = null;
       setIsLoading(false);
+    }
+  };
+
+  const stopAnalyze = () => {
+    abortRef.current?.abort();
+  };
+
+  const handleCopy = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Copy failed', err);
     }
   };
 
@@ -1238,18 +1288,31 @@ User's Problem: ${problem}
                     </button>
                   </div>
                   <textarea value={problem} onChange={(e) => setProblem(e.target.value)} placeholder={t.problemPlaceholder} className="w-full h-48 p-6 bg-gray-50 rounded-3xl border-none focus:ring-2 focus:ring-emerald-500 transition-all resize-none mb-8 text-xl leading-relaxed" />
-                  <button onClick={handleAnalyze} disabled={isLoading || !problem.trim()} className="w-full py-5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 text-white rounded-2xl font-bold flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-600/20">
-                    {isLoading ? <Loader2 className="animate-spin" /> : t.analyze}
-                  </button>
+                  <div className="flex gap-3">
+                    <button onClick={handleAnalyze} disabled={isLoading || !problem.trim()} className="flex-1 py-5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 text-white rounded-2xl font-bold flex items-center justify-center gap-2 transition-all shadow-lg shadow-emerald-600/20">
+                      {isLoading ? <Loader2 className="animate-spin" /> : t.analyze}
+                    </button>
+                    {isLoading && (
+                      <button onClick={stopAnalyze} className="px-6 py-5 bg-red-50 text-red-600 hover:bg-red-100 rounded-2xl font-bold flex items-center justify-center gap-2 transition-all" title={t.stop}>
+                        <Square className="w-5 h-5 fill-current" />
+                        <span className="hidden sm:inline">{t.stop}</span>
+                      </button>
+                    )}
+                  </div>
                 </section>
                 {error && <div className="bg-red-50 text-red-600 p-5 rounded-2xl border border-red-100">{error}</div>}
                 {result && (
                   <motion.section initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="bg-white rounded-[2.5rem] p-10 shadow-sm border border-black/5">
                     <div className="flex items-center justify-between mb-10">
                       <div className="flex items-center gap-3 text-emerald-600"><BookOpen className="w-8 h-8" /><h2 className="text-2xl font-bold">{t.chat}</h2></div>
-                      <button onClick={() => handleSpeak(result)} className={`p-4 rounded-full transition-all ${isSpeaking ? 'bg-emerald-600 text-white' : 'bg-gray-50 text-gray-400 hover:text-emerald-600'}`}>
-                        {isSpeaking ? <VolumeX className="w-6 h-6" /> : <Volume2 className="w-6 h-6" />}
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button onClick={() => handleCopy(result)} className={`p-4 rounded-full transition-all ${copied ? 'bg-emerald-600 text-white' : 'bg-gray-50 text-gray-400 hover:text-emerald-600'}`} title={copied ? t.copied : t.copy}>
+                          {copied ? <Check className="w-6 h-6" /> : <Copy className="w-6 h-6" />}
+                        </button>
+                        <button onClick={() => handleSpeak(result)} className={`p-4 rounded-full transition-all ${isSpeaking ? 'bg-emerald-600 text-white' : 'bg-gray-50 text-gray-400 hover:text-emerald-600'}`}>
+                          {isSpeaking ? <VolumeX className="w-6 h-6" /> : <Volume2 className="w-6 h-6" />}
+                        </button>
+                      </div>
                     </div>
                     {isLoading && isArticleMode && (
                       <div className="mb-12 flex flex-col items-center justify-center p-12 bg-emerald-50/30 rounded-[3rem] border border-dashed border-emerald-200">
