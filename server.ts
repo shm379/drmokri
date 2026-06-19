@@ -17,12 +17,14 @@ dotenv.config();
 // All AI calls run server-side so no API key ships in the client. Text, image
 // and TTS are routed through the NabuGate gateway when NABU_GATEWAY_URL is set;
 // otherwise they call Gemini directly (the Gemini fallback below).
-const NABU_GATEWAY_URL = process.env.NABU_GATEWAY_URL || "";
-const NABU_API_KEY = process.env.NABU_API_KEY || "";
-const NABU_MODEL = process.env.NABU_MODEL || "nabu-smart";
-const NABU_IMAGE_MODEL = process.env.NABU_IMAGE_MODEL || "nabu-image";
-const NABU_AUDIO_MODEL = process.env.NABU_AUDIO_MODEL || "nabu-voice";
-const NABU_EMBED_MODEL = process.env.NABU_EMBED_MODEL || "nabu-embed";
+// NOTE: the NABU_* values are `let` because the admin settings panel can
+// override them at runtime (persisted in SQLite — see loadSettings/applySetting).
+let NABU_GATEWAY_URL = process.env.NABU_GATEWAY_URL || "";
+let NABU_API_KEY = process.env.NABU_API_KEY || "";
+let NABU_MODEL = process.env.NABU_MODEL || "nabu-smart";
+let NABU_IMAGE_MODEL = process.env.NABU_IMAGE_MODEL || "nabu-image";
+let NABU_AUDIO_MODEL = process.env.NABU_AUDIO_MODEL || "nabu-voice";
+let NABU_EMBED_MODEL = process.env.NABU_EMBED_MODEL || "nabu-embed";
 const GEMINI_EMBED_MODEL = process.env.GEMINI_EMBED_MODEL || "text-embedding-004";
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
 const GEMINI_TEXT_MODEL = process.env.GEMINI_TEXT_MODEL || "gemini-3-flash-preview";
@@ -30,7 +32,11 @@ const GEMINI_IMAGE_MODEL = process.env.GEMINI_IMAGE_MODEL || "gemini-2.5-flash-i
 const GEMINI_TTS_MODEL = process.env.GEMINI_TTS_MODEL || "gemini-2.5-flash-preview-tts";
 // How long to wait on a NabuGate request before giving up (ms). Keeps a hung
 // gateway from blocking a request forever. Image generation gets 2x this.
-const NABU_TIMEOUT_MS = Number(process.env.NABU_TIMEOUT_MS) || 60000;
+let NABU_TIMEOUT_MS = Number(process.env.NABU_TIMEOUT_MS) || 60000;
+// Password that gates the in-app settings panel (GET/POST /api/settings). When
+// empty the panel is disabled, so the gateway address/key can never be changed
+// by an anonymous visitor.
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -135,7 +141,52 @@ db.exec(`
     id INTEGER PRIMARY KEY CHECK (id = 1),
     signature TEXT NOT NULL
   );
+
+  -- Admin-editable runtime config (overrides the NABU_* env defaults).
+  CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  );
 `);
+
+// --- Admin-editable runtime settings (persisted in SQLite) ---
+// These override the NABU_* env defaults so the gateway address / models can be
+// changed from the in-app settings panel without a redeploy. NABU_TIMEOUT_MS is
+// numeric; everything else is a plain string.
+const SETTABLE: Record<string, "string" | "number"> = {
+  NABU_GATEWAY_URL: "string",
+  NABU_API_KEY: "string",
+  NABU_MODEL: "string",
+  NABU_IMAGE_MODEL: "string",
+  NABU_AUDIO_MODEL: "string",
+  NABU_EMBED_MODEL: "string",
+  NABU_TIMEOUT_MS: "number",
+};
+
+// applySetting writes one saved value back onto the live config binding.
+function applySetting(key: string, value: string): void {
+  switch (key) {
+    case "NABU_GATEWAY_URL": NABU_GATEWAY_URL = value; break;
+    case "NABU_API_KEY": NABU_API_KEY = value; break;
+    case "NABU_MODEL": NABU_MODEL = value; break;
+    case "NABU_IMAGE_MODEL": NABU_IMAGE_MODEL = value; break;
+    case "NABU_AUDIO_MODEL": NABU_AUDIO_MODEL = value; break;
+    case "NABU_EMBED_MODEL": NABU_EMBED_MODEL = value; break;
+    case "NABU_TIMEOUT_MS": NABU_TIMEOUT_MS = Number(value) || NABU_TIMEOUT_MS; break;
+  }
+}
+
+// loadSettings overlays any persisted overrides on top of the env defaults.
+function loadSettings(): void {
+  try {
+    const rows = db.prepare("SELECT key, value FROM settings").all() as { key: string; value: string }[];
+    for (const r of rows) if (r.key in SETTABLE) applySetting(r.key, r.value);
+  } catch (err: any) {
+    console.error("Failed to load settings:", err?.message || err);
+  }
+}
+
+loadSettings();
 
 // runChat sends a chat completion. It prefers the NabuGate gateway (so every
 // project shares one routing/fallback/secret layer); if the gateway is not
@@ -472,6 +523,94 @@ async function startServer() {
       }
     }
     res.json(info);
+  });
+
+  // --- Admin settings panel (change the NabuGate address / models at runtime) ---
+  // Gated by ADMIN_PASSWORD (sent in the x-admin-password header). The panel is
+  // disabled entirely when ADMIN_PASSWORD is unset, so secrets are never exposed
+  // or editable by anonymous visitors.
+  const adminAuthorized = (req: any): boolean => {
+    if (!ADMIN_PASSWORD) return false;
+    const provided = Buffer.from(String(req.header("x-admin-password") || ""));
+    const expected = Buffer.from(ADMIN_PASSWORD);
+    return provided.length === expected.length && crypto.timingSafeEqual(provided, expected);
+  };
+
+  // Never returns the API key itself — only whether one is set.
+  const publicSettings = () => ({
+    NABU_GATEWAY_URL,
+    NABU_MODEL,
+    NABU_IMAGE_MODEL,
+    NABU_AUDIO_MODEL,
+    NABU_EMBED_MODEL,
+    NABU_TIMEOUT_MS,
+    hasNabuApiKey: Boolean(NABU_API_KEY),
+    aiBackend: aiBackend(),
+  });
+
+  // Lets the client know whether the panel is available without leaking config.
+  app.get("/api/settings/status", (_req, res) => {
+    res.json({ enabled: Boolean(ADMIN_PASSWORD) });
+  });
+
+  app.get("/api/settings", (req, res) => {
+    if (!ADMIN_PASSWORD) return res.status(403).json({ error: "Settings panel disabled. Set ADMIN_PASSWORD to enable it." });
+    if (!adminAuthorized(req)) return res.status(401).json({ error: "Unauthorized" });
+    res.json(publicSettings());
+  });
+
+  app.post("/api/settings", (req, res) => {
+    if (!ADMIN_PASSWORD) return res.status(403).json({ error: "Settings panel disabled. Set ADMIN_PASSWORD to enable it." });
+    if (!adminAuthorized(req)) return res.status(401).json({ error: "Unauthorized" });
+
+    const updates = (req.body && typeof req.body === "object") ? (req.body.settings ?? req.body) : {};
+    const toSave: { key: string; value: string }[] = [];
+    let embeddingConfigChanged = false;
+
+    for (const [key, type] of Object.entries(SETTABLE)) {
+      if (!(key in updates)) continue;
+      const raw = updates[key];
+      if (raw === undefined || raw === null) continue;
+      // Blank API key means "keep the current one".
+      if (key === "NABU_API_KEY" && String(raw).trim() === "") continue;
+      let value = String(raw).trim();
+
+      if (key === "NABU_GATEWAY_URL" && value) {
+        try {
+          const u = new URL(value);
+          if (u.protocol !== "http:" && u.protocol !== "https:") throw new Error("bad scheme");
+          value = value.replace(/\/$/, "");
+        } catch {
+          return res.status(400).json({ error: "NABU_GATEWAY_URL must be a valid http(s) URL" });
+        }
+      }
+      if (type === "number") {
+        const n = Number(value);
+        if (!Number.isFinite(n) || n <= 0) return res.status(400).json({ error: `${key} must be a positive number` });
+        value = String(Math.round(n));
+      }
+      if (key === "NABU_GATEWAY_URL" || key === "NABU_EMBED_MODEL") embeddingConfigChanged = true;
+      toSave.push({ key, value });
+    }
+
+    try {
+      const stmt = db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)");
+      const tx = db.transaction((rows: { key: string; value: string }[]) => {
+        for (const r of rows) { stmt.run(r.key, r.value); applySetting(r.key, r.value); }
+      });
+      tx(toSave);
+    } catch (err: any) {
+      console.error("save settings error:", err?.message || err);
+      return res.status(500).json({ error: "Failed to save settings" });
+    }
+
+    // The cached corpus embeddings depend on the gateway/embed model, so rebuild
+    // them next time if either changed.
+    if (embeddingConfigChanged) {
+      corpusReady = false;
+      void ensureCorpusVectors();
+    }
+    res.json({ success: true, settings: publicSettings() });
   });
 
   // API Routes

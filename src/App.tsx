@@ -26,6 +26,9 @@ import {
   Share2,
   Sparkles,
   X,
+  Settings,
+  Wifi,
+  WifiOff,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { podcasts as PODCASTS_RAW } from './data/podcasts';
@@ -193,6 +196,55 @@ const TRANSLATIONS: Record<string, any> = {
   }
 };
 
+// Labels for the admin settings panel. Falls back to English for languages
+// without a dedicated entry.
+const SETTINGS_LABELS: Record<string, any> = {
+  fa: {
+    title: 'تنظیمات اتصال هوش مصنوعی',
+    desc: 'آدرس و مدل‌های NabuGate را اینجا تغییر دهید.',
+    adminPassword: 'رمز مدیریت',
+    unlock: 'ورود',
+    gatewayUrl: 'آدرس NabuGate (Gateway URL)',
+    apiKey: 'کلید API',
+    apiKeyKeep: 'تنظیم‌شده — برای حفظ مقدار فعلی خالی بگذارید',
+    textModel: 'مدل متن',
+    imageModel: 'مدل تصویر',
+    audioModel: 'مدل صدا',
+    embedModel: 'مدل امبدینگ',
+    timeout: 'مهلت زمانی (میلی‌ثانیه)',
+    save: 'ذخیره تنظیمات',
+    saved: 'با موفقیت ذخیره شد ✓',
+    test: 'تست اتصال',
+    connected: 'متصل',
+    notConnected: 'عدم اتصال',
+    unauthorized: 'رمز مدیریت اشتباه است',
+    genericError: 'خطایی رخ داد.',
+    backend: 'بک‌اند فعال',
+  },
+  en: {
+    title: 'AI Connection Settings',
+    desc: 'Change the NabuGate address and models here.',
+    adminPassword: 'Admin password',
+    unlock: 'Unlock',
+    gatewayUrl: 'NabuGate Gateway URL',
+    apiKey: 'API Key',
+    apiKeyKeep: 'Set — leave blank to keep the current value',
+    textModel: 'Text model',
+    imageModel: 'Image model',
+    audioModel: 'Audio model',
+    embedModel: 'Embedding model',
+    timeout: 'Timeout (ms)',
+    save: 'Save settings',
+    saved: 'Saved successfully ✓',
+    test: 'Test connection',
+    connected: 'Connected',
+    notConnected: 'Not connected',
+    unauthorized: 'Wrong admin password',
+    genericError: 'Something went wrong.',
+    backend: 'Active backend',
+  },
+};
+
 const ASSESSMENT_QUESTIONS = [
   {
     id: 'q1',
@@ -299,8 +351,23 @@ export default function App() {
   const [publicFeed, setPublicFeed] = useState<SavedQuery[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  
+
+  // --- Admin settings panel (NabuGate connection) ---
+  const [showSettings, setShowSettings] = useState(false);
+  const [settingsEnabled, setSettingsEnabled] = useState(false);
+  const [adminPassword, setAdminPassword] = useState(() => localStorage.getItem('mokri_admin_pw') || '');
+  const [adminAuthed, setAdminAuthed] = useState(false);
+  const [settingsForm, setSettingsForm] = useState<Record<string, string>>({
+    NABU_GATEWAY_URL: '', NABU_MODEL: '', NABU_IMAGE_MODEL: '',
+    NABU_AUDIO_MODEL: '', NABU_EMBED_MODEL: '', NABU_TIMEOUT_MS: '', NABU_API_KEY: '',
+  });
+  const [settingsHasKey, setSettingsHasKey] = useState(false);
+  const [settingsBusy, setSettingsBusy] = useState(false);
+  const [settingsMsg, setSettingsMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+  const [healthInfo, setHealthInfo] = useState<any>(null);
+
   const t = TRANSLATIONS[lang] || TRANSLATIONS.fa;
+  const st = SETTINGS_LABELS[lang] || SETTINGS_LABELS.en;
   const dir = LANGUAGES.find(l => l.id === lang)?.dir || 'rtl';
 
   const recognitionRef = useRef<any>(null);
@@ -333,6 +400,95 @@ export default function App() {
       setStep('welcome');
     }
   }, [lang]);
+
+  // Find out whether the admin settings panel is available (ADMIN_PASSWORD set
+  // server-side). Only then do we render the gear button.
+  useEffect(() => {
+    fetch('/api/settings/status')
+      .then(res => res.json())
+      .then(data => setSettingsEnabled(Boolean(data.enabled)))
+      .catch(() => setSettingsEnabled(false));
+  }, []);
+
+  const loadAdminSettings = async (pw: string) => {
+    setSettingsBusy(true);
+    setSettingsMsg(null);
+    try {
+      const res = await fetch('/api/settings', { headers: { 'x-admin-password': pw } });
+      if (res.status === 401) {
+        setAdminAuthed(false);
+        setSettingsMsg({ type: 'err', text: st.unauthorized });
+        return;
+      }
+      if (!res.ok) {
+        setSettingsMsg({ type: 'err', text: st.genericError });
+        return;
+      }
+      const data = await res.json();
+      setSettingsForm({
+        NABU_GATEWAY_URL: data.NABU_GATEWAY_URL || '',
+        NABU_MODEL: data.NABU_MODEL || '',
+        NABU_IMAGE_MODEL: data.NABU_IMAGE_MODEL || '',
+        NABU_AUDIO_MODEL: data.NABU_AUDIO_MODEL || '',
+        NABU_EMBED_MODEL: data.NABU_EMBED_MODEL || '',
+        NABU_TIMEOUT_MS: String(data.NABU_TIMEOUT_MS ?? ''),
+        NABU_API_KEY: '',
+      });
+      setSettingsHasKey(Boolean(data.hasNabuApiKey));
+      setAdminAuthed(true);
+      localStorage.setItem('mokri_admin_pw', pw);
+    } catch {
+      setSettingsMsg({ type: 'err', text: st.genericError });
+    } finally {
+      setSettingsBusy(false);
+    }
+  };
+
+  const testConnection = async () => {
+    try {
+      const res = await fetch('/api/health');
+      setHealthInfo(await res.json());
+    } catch {
+      setHealthInfo(null);
+    }
+  };
+
+  const saveAdminSettings = async () => {
+    setSettingsBusy(true);
+    setSettingsMsg(null);
+    try {
+      const payload: Record<string, string> = { ...settingsForm };
+      if (!payload.NABU_API_KEY) delete payload.NABU_API_KEY; // blank = keep current
+      const res = await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-admin-password': adminPassword },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setSettingsMsg({ type: 'err', text: data.error || st.genericError });
+        return;
+      }
+      setSettingsHasKey(Boolean(data.settings?.hasNabuApiKey));
+      setSettingsForm(f => ({ ...f, NABU_API_KEY: '' }));
+      setSettingsMsg({ type: 'ok', text: st.saved });
+      testConnection();
+    } catch {
+      setSettingsMsg({ type: 'err', text: st.genericError });
+    } finally {
+      setSettingsBusy(false);
+    }
+  };
+
+  const openSettings = () => {
+    setShowSettings(true);
+    setSettingsMsg(null);
+    setHealthInfo(null);
+    if (adminPassword) {
+      loadAdminSettings(adminPassword);
+      testConnection();
+    }
+  };
 
   const handleLogin = async () => {
     if (!phone.trim()) return;
@@ -745,6 +901,16 @@ User's Problem: ${problem}
           </div>
 
           <div className="flex items-center gap-2">
+            {/* Admin Settings (only when enabled server-side) */}
+            {settingsEnabled && (
+              <button
+                onClick={openSettings}
+                className="p-2.5 bg-white rounded-xl shadow-sm border border-gray-100 text-gray-500 hover:text-emerald-600 transition-all"
+                title={st.title}
+              >
+                <Settings className="w-5 h-5" />
+              </button>
+            )}
             {/* Language Selector */}
             <div className="relative">
               <button 
@@ -807,6 +973,142 @@ User's Problem: ${problem}
             )}
           </div>
         </header>
+
+        {/* Admin Settings Modal */}
+        <AnimatePresence>
+          {showSettings && (
+            <>
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={() => setShowSettings(false)}
+                className="fixed inset-0 bg-black/30 backdrop-blur-sm z-[60]"
+              />
+              <motion.div
+                initial={{ opacity: 0, y: 30, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: 30, scale: 0.98 }}
+                transition={{ type: 'spring', damping: 26, stiffness: 240 }}
+                className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[92%] max-w-lg max-h-[88vh] overflow-y-auto bg-white rounded-[2rem] shadow-2xl border border-gray-100 p-8 z-[61]"
+                dir={dir}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-3 text-emerald-600">
+                    <Settings className="w-6 h-6" />
+                    <h3 className="text-xl font-bold text-gray-900">{st.title}</h3>
+                  </div>
+                  <button onClick={() => setShowSettings(false)} className="p-2 bg-gray-100 rounded-full text-gray-500 hover:text-gray-800">
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+                <p className="text-sm text-gray-500 mb-6">{st.desc}</p>
+
+                {!adminAuthed ? (
+                  <div className="space-y-4">
+                    <label className="block text-sm font-bold text-gray-700">{st.adminPassword}</label>
+                    <input
+                      type="password"
+                      value={adminPassword}
+                      onChange={(e) => setAdminPassword(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' && adminPassword) loadAdminSettings(adminPassword); }}
+                      className="w-full p-4 bg-gray-50 rounded-2xl border-2 border-transparent focus:border-emerald-500 focus:bg-white transition-all"
+                      placeholder="••••••••"
+                    />
+                    {settingsMsg && (
+                      <div className={`text-sm ${settingsMsg.type === 'ok' ? 'text-emerald-600' : 'text-red-500'}`}>{settingsMsg.text}</div>
+                    )}
+                    <button
+                      onClick={() => loadAdminSettings(adminPassword)}
+                      disabled={settingsBusy || !adminPassword}
+                      className="w-full py-4 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 text-white rounded-2xl font-bold flex items-center justify-center gap-2 transition-all"
+                    >
+                      {settingsBusy ? <Loader2 className="animate-spin w-5 h-5" /> : st.unlock}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {healthInfo && (
+                      <div className={`flex items-center gap-2 p-3 rounded-2xl text-sm font-bold ${healthInfo?.gateway?.reachable ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+                        {healthInfo?.gateway?.reachable ? <Wifi className="w-4 h-4" /> : <WifiOff className="w-4 h-4" />}
+                        <span>{healthInfo?.gateway?.reachable ? st.connected : st.notConnected}</span>
+                        <span className="font-normal text-xs opacity-70">({st.backend}: {healthInfo.aiBackend})</span>
+                      </div>
+                    )}
+
+                    <div>
+                      <label className="block text-sm font-bold text-gray-700 mb-1">{st.gatewayUrl}</label>
+                      <input
+                        type="text" dir="ltr"
+                        value={settingsForm.NABU_GATEWAY_URL}
+                        onChange={(e) => setSettingsForm(f => ({ ...f, NABU_GATEWAY_URL: e.target.value }))}
+                        placeholder="http://nabugate:8080"
+                        className="w-full p-3 bg-gray-50 rounded-xl border-2 border-transparent focus:border-emerald-500 focus:bg-white transition-all text-left"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-bold text-gray-700 mb-1">{st.apiKey}</label>
+                      <input
+                        type="password" dir="ltr"
+                        value={settingsForm.NABU_API_KEY}
+                        onChange={(e) => setSettingsForm(f => ({ ...f, NABU_API_KEY: e.target.value }))}
+                        placeholder={settingsHasKey ? '••••••••••••' : ''}
+                        className="w-full p-3 bg-gray-50 rounded-xl border-2 border-transparent focus:border-emerald-500 focus:bg-white transition-all text-left"
+                      />
+                      {settingsHasKey && <p className="text-xs text-gray-400 mt-1">{st.apiKeyKeep}</p>}
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-bold text-gray-600 mb-1">{st.textModel}</label>
+                        <input type="text" dir="ltr" value={settingsForm.NABU_MODEL} onChange={(e) => setSettingsForm(f => ({ ...f, NABU_MODEL: e.target.value }))} className="w-full p-3 bg-gray-50 rounded-xl border-2 border-transparent focus:border-emerald-500 focus:bg-white transition-all text-left" />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-gray-600 mb-1">{st.imageModel}</label>
+                        <input type="text" dir="ltr" value={settingsForm.NABU_IMAGE_MODEL} onChange={(e) => setSettingsForm(f => ({ ...f, NABU_IMAGE_MODEL: e.target.value }))} className="w-full p-3 bg-gray-50 rounded-xl border-2 border-transparent focus:border-emerald-500 focus:bg-white transition-all text-left" />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-gray-600 mb-1">{st.audioModel}</label>
+                        <input type="text" dir="ltr" value={settingsForm.NABU_AUDIO_MODEL} onChange={(e) => setSettingsForm(f => ({ ...f, NABU_AUDIO_MODEL: e.target.value }))} className="w-full p-3 bg-gray-50 rounded-xl border-2 border-transparent focus:border-emerald-500 focus:bg-white transition-all text-left" />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-gray-600 mb-1">{st.embedModel}</label>
+                        <input type="text" dir="ltr" value={settingsForm.NABU_EMBED_MODEL} onChange={(e) => setSettingsForm(f => ({ ...f, NABU_EMBED_MODEL: e.target.value }))} className="w-full p-3 bg-gray-50 rounded-xl border-2 border-transparent focus:border-emerald-500 focus:bg-white transition-all text-left" />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-gray-600 mb-1">{st.timeout}</label>
+                      <input type="number" dir="ltr" value={settingsForm.NABU_TIMEOUT_MS} onChange={(e) => setSettingsForm(f => ({ ...f, NABU_TIMEOUT_MS: e.target.value }))} className="w-full p-3 bg-gray-50 rounded-xl border-2 border-transparent focus:border-emerald-500 focus:bg-white transition-all text-left" />
+                    </div>
+
+                    {settingsMsg && (
+                      <div className={`text-sm ${settingsMsg.type === 'ok' ? 'text-emerald-600' : 'text-red-500'}`}>{settingsMsg.text}</div>
+                    )}
+
+                    <div className="flex gap-3 pt-2">
+                      <button
+                        onClick={testConnection}
+                        disabled={settingsBusy}
+                        className="px-5 py-4 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-2xl font-bold transition-all"
+                      >
+                        {st.test}
+                      </button>
+                      <button
+                        onClick={saveAdminSettings}
+                        disabled={settingsBusy}
+                        className="flex-1 py-4 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 text-white rounded-2xl font-bold flex items-center justify-center gap-2 transition-all"
+                      >
+                        {settingsBusy ? <Loader2 className="animate-spin w-5 h-5" /> : st.save}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </motion.div>
+            </>
+          )}
+        </AnimatePresence>
 
         <main className="relative pb-24 md:pb-8">
           <AnimatePresence mode="wait">

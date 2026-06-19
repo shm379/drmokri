@@ -70,6 +70,14 @@ NabuGate is configured, pings the gateway and returns whether it is reachable
 server also logs the active backend — and a NabuGate reachability check — on
 startup.
 
+**Settings panel:** set `ADMIN_PASSWORD` to enable an in-app settings panel (the
+gear icon in the header) where the NabuGate gateway URL, API key, model aliases,
+and timeout can be changed at runtime and saved to the database (these override
+the `NABU_*` env defaults and survive restarts). The panel is gated by the admin
+password and is disabled entirely when `ADMIN_PASSWORD` is unset, so the gateway
+config can never be changed — or the API key read — by an anonymous visitor (the
+API key is never returned to the browser, only whether one is set).
+
 **Semantic search:** `/api/relevant-context` ranks podcasts by embedding
 similarity (alias `nabu-embed`). Corpus vectors are built once and cached in
 SQLite (rebuilt automatically if the model or corpus changes); until they are
@@ -88,6 +96,7 @@ matching.
 | `NABU_AUDIO_MODEL` | Runtime  | NabuGate speech alias (default `nabu-voice`).                     |
 | `NABU_EMBED_MODEL` | Runtime  | NabuGate embedding alias for semantic search (default `nabu-embed`). |
 | `NABU_TIMEOUT_MS`  | Runtime  | Per-request timeout for gateway calls in ms (default `60000`; images get 2x). The answer stream is exempt once it starts. |
+| `ADMIN_PASSWORD`   | Runtime  | Enables the in-app settings panel to edit the NabuGate config at runtime. Unset = panel disabled. Server-side only. |
 | `PORT`             | Runtime  | Port the server listens on (default `3000`).                      |
 | `DATABASE_PATH`    | Runtime  | SQLite file path (server default `mokri_assistant.db`; the Docker image sets `/data/mokri_assistant.db`). |
 | `APP_URL`          | Runtime  | Public URL of the deployment (optional).                          |
