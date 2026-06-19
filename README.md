@@ -64,6 +64,12 @@ when configured; otherwise the server calls Gemini directly.
 **Streaming:** `/api/analyze-stream` returns the answer as Server-Sent Events so
 the UI types it out live.
 
+**Health check:** `GET /api/health` reports the active AI backend and, when
+NabuGate is configured, pings the gateway and returns whether it is reachable
+(`{ "aiBackend": "nabugate", "gateway": { "reachable": true, ... } }`). The
+server also logs the active backend — and a NabuGate reachability check — on
+startup.
+
 **Semantic search:** `/api/relevant-context` ranks podcasts by embedding
 similarity (alias `nabu-embed`). Corpus vectors are built once and cached in
 SQLite (rebuilt automatically if the model or corpus changes); until they are
@@ -81,6 +87,7 @@ matching.
 | `NABU_IMAGE_MODEL` | Runtime  | NabuGate image alias (default `nabu-image`).                      |
 | `NABU_AUDIO_MODEL` | Runtime  | NabuGate speech alias (default `nabu-voice`).                     |
 | `NABU_EMBED_MODEL` | Runtime  | NabuGate embedding alias for semantic search (default `nabu-embed`). |
+| `NABU_TIMEOUT_MS`  | Runtime  | Per-request timeout for gateway calls in ms (default `60000`; images get 2x). The answer stream is exempt once it starts. |
 | `PORT`             | Runtime  | Port the server listens on (default `3000`).                      |
 | `DATABASE_PATH`    | Runtime  | SQLite file path (server default `mokri_assistant.db`; the Docker image sets `/data/mokri_assistant.db`). |
 | `APP_URL`          | Runtime  | Public URL of the deployment (optional).                          |
